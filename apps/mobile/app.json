@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "ShootCreater",
+    "slug": "shoot-creater",
+    "version": "0.1.0",
+    "scheme": "shoot-creater",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.shootcreater.app",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Voice commands to record shots",
+        "NSMicrophoneUsageDescription": "Microphone for voice shot recording"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Microphone for voice shot recording",
+          "speechRecognitionPermission": "Voice commands to record shots"
+        }
+      ],
+      [
+        "@bacons/apple-targets"
+      ],
+      "expo-sqlite"
+    ]
+  }
+}
