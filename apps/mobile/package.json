@@ -8,6 +8,8 @@
     "prebuild": "expo prebuild",
     "ios": "expo run:ios",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "android": "expo run:android"
   },
   "dependencies": {
@@ -33,6 +35,7 @@
   "devDependencies": {
     "@bacons/apple-targets": "~4.0.0",
     "@types/react": "~19.1.0",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "vitest": "^4.0.18"
   }
 }

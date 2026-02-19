@@ -6,15 +6,15 @@ let _db: SQLite.SQLiteDatabase | null = null;
 
 /** Get or create the database instance */
 export function getDatabase(): SQLite.SQLiteDatabase {
-	if (!_db) {
-		_db = SQLite.openDatabaseSync(DB_NAME);
-		initSchema(_db);
-	}
-	return _db;
+  if (!_db) {
+    _db = SQLite.openDatabaseSync(DB_NAME);
+    initSchema(_db);
+  }
+  return _db;
 }
 
 function initSchema(db: SQLite.SQLiteDatabase): void {
-	db.execSync(`
+  db.execSync(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY NOT NULL,
       sport_id TEXT NOT NULL,
@@ -34,19 +34,19 @@ function initSchema(db: SQLite.SQLiteDatabase): void {
     );
   `);
 
-	// マイグレーション: tag_ids, memo カラム追加 (既存DB対応)
-	addColumnIfNotExists(db, "sessions", "tag_ids", "TEXT NOT NULL DEFAULT '[]'");
-	addColumnIfNotExists(db, "sessions", "memo", "TEXT NOT NULL DEFAULT ''");
+  // マイグレーション: tag_ids, memo カラム追加 (既存DB対応)
+  addColumnIfNotExists(db, "sessions", "tag_ids", "TEXT NOT NULL DEFAULT '[]'");
+  addColumnIfNotExists(db, "sessions", "memo", "TEXT NOT NULL DEFAULT ''");
 }
 
 function addColumnIfNotExists(
-	db: SQLite.SQLiteDatabase,
-	table: string,
-	column: string,
-	definition: string,
+  db: SQLite.SQLiteDatabase,
+  table: string,
+  column: string,
+  definition: string,
 ): void {
-	const info = db.getAllSync<{ name: string }>(`PRAGMA table_info(${table})`);
-	if (!info.some((col) => col.name === column)) {
-		db.runSync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-	}
+  const info = db.getAllSync<{ name: string }>(`PRAGMA table_info(${table})`);
+  if (!info.some((col) => col.name === column)) {
+    db.runSync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }

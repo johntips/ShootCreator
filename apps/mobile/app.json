@@ -24,9 +24,7 @@
           "speechRecognitionPermission": "Voice commands to record shots"
         }
       ],
-      [
-        "@bacons/apple-targets"
-      ],
+      ["@bacons/apple-targets"],
       "expo-sqlite"
     ]
   }
