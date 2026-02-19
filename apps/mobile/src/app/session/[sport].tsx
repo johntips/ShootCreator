@@ -1,7 +1,8 @@
 import { CourtMap } from "@/components/CourtMap";
 import { ZoneSelector } from "@/components/ZoneSelector";
+import { useWatchSync } from "@/features/sync/useWatchSync";
 import { useVoiceCounter } from "@/features/voice/useVoiceCounter";
-import { useSessionStore } from "@/infra/storage";
+import { useSessionStore, useTagStore } from "@/infra/storage";
 import {
 	addShot,
 	basketball,
@@ -12,10 +13,21 @@ import {
 	getZoneStats,
 	undoLastShot,
 } from "@shoot-creater/core";
-import type { Session, Shot } from "@shoot-creater/core";
+import type { Session, Shot, Tag } from "@shoot-creater/core";
+import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { useCallback, useMemo, useRef, useState } from "react";
+import {
+	Alert,
+	KeyboardAvoidingView,
+	Platform,
+	Pressable,
+	ScrollView,
+	StyleSheet,
+	Text,
+	TextInput,
+	View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // ─── Group label mapping ────────────────────────────────────────
@@ -39,15 +51,56 @@ export default function SessionScreen() {
 	const { sport: sportId } = useLocalSearchParams<{ sport: string }>();
 	const sportConfig = getSport(sportId ?? "basketball") ?? basketball;
 	const { save } = useSessionStore();
+	const { tags, createTag } = useTagStore();
 	const router = useRouter();
 	const insets = useSafeAreaInsets();
 
 	const [session, setSession] = useState<Session>(() => createSession(sportId ?? "basketball"));
 	const [selectedZoneId, setSelectedZoneId] = useState(sportConfig?.zones[0]?.id ?? "");
+	const [showTagPicker, setShowTagPicker] = useState(false);
+	const [newTagName, setNewTagName] = useState("");
+	const memoRef = useRef(session.memo);
 
 	const zoneStats = useMemo(() => getZoneStats(session), [session]);
 	const totalStats = useMemo(() => getTotalStats(session), [session]);
 
+	const selectedTagObjects = useMemo(
+		() => tags.filter((t) => session.tagIds.includes(t.id)),
+		[tags, session.tagIds],
+	);
+
+	// ─── Watch 双方向同期 ────────────────────────────────────
+	const handleRemoteShot = useCallback(
+		(shot: Shot) => {
+			setSession((prev) => {
+				const next = addShot(prev, shot);
+				save(next);
+				return next;
+			});
+		},
+		[save],
+	);
+
+	const handleRemoteZoneChange = useCallback((zoneId: string) => {
+		setSelectedZoneId(zoneId);
+	}, []);
+
+	const watchSync = useWatchSync({
+		session,
+		onRemoteShot: handleRemoteShot,
+		onRemoteZoneChange: handleRemoteZoneChange,
+	});
+
+	/** ユーザー操作でゾーン変更 → Watch にも同期 */
+	const handleZoneChange = useCallback(
+		(zoneId: string) => {
+			setSelectedZoneId(zoneId);
+			watchSync.sendZoneChange(zoneId);
+		},
+		[watchSync],
+	);
+
+	// ─── Shot / Undo / End ───────────────────────────────────
 	const handleShot = useCallback(
 		(made: boolean) => {
 			const shot: Shot = { zoneId: selectedZoneId, made, timestamp: Date.now() };
@@ -56,8 +109,9 @@ export default function SessionScreen() {
 				save(next);
 				return next;
 			});
+			watchSync.sendShot(selectedZoneId, made);
 		},
-		[selectedZoneId, save],
+		[selectedZoneId, save, watchSync],
 	);
 
 	const handleUndo = useCallback(() => {
@@ -82,13 +136,50 @@ export default function SessionScreen() {
 				onPress: async () => {
 					const ended = endSession(session);
 					await save(ended);
+					watchSync.sendSessionEnd(ended);
 					router.replace(`/summary/${ended.id}`);
 				},
 			},
 		]);
-	}, [session, save, router]);
+	}, [session, save, router, watchSync]);
 
-	// Voice counter (always called — hooks must not be conditional)
+	const toggleTag = useCallback(
+		(tagId: string) => {
+			setSession((prev) => {
+				const has = prev.tagIds.includes(tagId);
+				const next = {
+					...prev,
+					tagIds: has ? prev.tagIds.filter((id) => id !== tagId) : [...prev.tagIds, tagId],
+				};
+				save(next);
+				return next;
+			});
+		},
+		[save],
+	);
+
+	const handleCreateTag = useCallback(async () => {
+		const name = newTagName.trim();
+		if (!name) return;
+		const tag = await createTag(name);
+		setNewTagName("");
+		toggleTag(tag.id);
+		setShowTagPicker(false);
+	}, [newTagName, createTag, toggleTag]);
+
+	const handleMemoChange = useCallback(
+		(text: string) => {
+			memoRef.current = text;
+			setSession((prev) => {
+				const next = { ...prev, memo: text };
+				save(next);
+				return next;
+			});
+		},
+		[save],
+	);
+
+	// Voice counter
 	const voice = useVoiceCounter(sportConfig, handleShot);
 
 	// Selected zone info
@@ -107,107 +198,188 @@ export default function SessionScreen() {
 	return (
 		<>
 			<Stack.Screen options={{ title: sportConfig.name, headerShown: false }} />
-			<View style={[styles.container, { paddingTop: insets.top }]}>
-				{/* ── Header ── */}
-				<View style={styles.header}>
-					<Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
-						<Text style={styles.backBtnText}>{"‹ Back"}</Text>
-					</Pressable>
-					<Text style={styles.headerTitle}>{sportConfig.name}</Text>
-					{session.shots.length > 0 ? (
-						<Pressable onPress={handleEnd} style={styles.endBtn} hitSlop={8}>
-							<Text style={styles.endBtnText}>END</Text>
+			<KeyboardAvoidingView
+				style={[styles.container, { paddingTop: insets.top }]}
+				behavior={Platform.OS === "ios" ? "padding" : undefined}
+			>
+				<LinearGradient
+					colors={["#1a1a3e", "#0a0a1a", "#0d1117"]}
+					style={StyleSheet.absoluteFill}
+				/>
+				<ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+					{/* ── Header ── */}
+					<View style={styles.header}>
+						<Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
+							<Text style={styles.backBtnText}>{"‹ Back"}</Text>
 						</Pressable>
-					) : (
-						<View style={{ width: 44 }} />
-					)}
-				</View>
-
-				{/* ── Court Map ── */}
-				<View style={styles.courtSection}>
-					{isBasketball ? (
-						<CourtMap
-							zones={sportConfig.zones}
-							selectedZoneId={selectedZoneId}
-							onSelectZone={setSelectedZoneId}
-							zoneStats={zoneStats}
-						/>
-					) : (
-						<ZoneSelector
-							zones={sportConfig.zones}
-							selectedId={selectedZoneId}
-							onSelect={setSelectedZoneId}
-						/>
-					)}
-				</View>
-
-				{/* ── Selected Zone Indicator ── */}
-				<View style={styles.zoneIndicator}>
-					<View style={[styles.groupBadge, { backgroundColor: groupColor }]}>
-						<Text style={styles.groupBadgeText}>{groupLabel}</Text>
-					</View>
-					<Text style={styles.zoneName}>{selectedZone?.label ?? "Select Zone"}</Text>
-					<Pressable
-						style={[styles.voiceBtn, voice.isListening && styles.voiceBtnActive]}
-						onPress={voice.toggle}
-					>
-						<Text style={styles.voiceBtnText}>{voice.isListening ? "MIC ON" : "MIC"}</Text>
-					</Pressable>
-				</View>
-
-				{/* ── FG Counter ── */}
-				<View style={styles.counterSection}>
-					<View style={styles.fgMain}>
-						<Text style={styles.fgCount}>
-							{zoneMade}
-							<Text style={styles.fgSlash}> / </Text>
-							{zoneAttempted}
-						</Text>
-						{zonePct !== null ? (
-							<Text style={[styles.fgPct, { color: groupColor }]}>{zonePct}%</Text>
-						) : (
-							<Text style={styles.fgPctEmpty}>---%</Text>
-						)}
-					</View>
-					<View style={styles.totalRow}>
-						<Text style={styles.totalLabel}>Total</Text>
-						<Text style={styles.totalValue}>
-							{totalStats.made}/{totalStats.attempted}
-							{totalPct !== null ? ` (${totalPct}%)` : ""}
-						</Text>
-						{session.shots.length > 0 && (
-							<Pressable onPress={handleUndo} style={styles.undoBtn}>
-								<Text style={styles.undoBtnText}>UNDO</Text>
+						<Text style={styles.headerTitle}>{sportConfig.name}</Text>
+						{session.shots.length > 0 ? (
+							<Pressable onPress={handleEnd} style={styles.endBtn} hitSlop={8}>
+								<Text style={styles.endBtnText}>END</Text>
 							</Pressable>
+						) : (
+							<View style={{ width: 44 }} />
 						)}
 					</View>
-				</View>
 
-				{/* ── MADE / MISS Buttons ── */}
-				<View style={styles.buttonRow}>
-					<Pressable
-						style={({ pressed }) => [styles.shotBtn, styles.missBtn, pressed && styles.btnPressed]}
-						onPress={() => handleShot(false)}
-					>
-						<Text style={styles.shotBtnText}>MISS</Text>
-					</Pressable>
-					<Pressable
-						style={({ pressed }) => [styles.shotBtn, styles.madeBtn, pressed && styles.btnPressed]}
-						onPress={() => handleShot(true)}
-					>
-						<Text style={styles.shotBtnText}>MADE</Text>
-					</Pressable>
-				</View>
-
-				{/* ── Voice feedback (compact) ── */}
-				{voice.lastWord && (
-					<View style={styles.voiceFeedback}>
-						<Text style={styles.voiceFeedbackText}>
-							Heard: <Text style={styles.voiceFeedbackWord}>{voice.lastWord}</Text>
-						</Text>
+					{/* ── Court Map ── */}
+					<View style={styles.courtSection}>
+						{isBasketball ? (
+							<CourtMap
+								zones={sportConfig.zones}
+								selectedZoneId={selectedZoneId}
+								onSelectZone={handleZoneChange}
+								zoneStats={zoneStats}
+							/>
+						) : (
+							<ZoneSelector
+								zones={sportConfig.zones}
+								selectedId={selectedZoneId}
+								onSelect={handleZoneChange}
+							/>
+						)}
 					</View>
-				)}
-			</View>
+
+					{/* ── Selected Zone Indicator ── */}
+					<View style={styles.zoneIndicator}>
+						<View style={[styles.groupBadge, { backgroundColor: groupColor }]}>
+							<Text style={styles.groupBadgeText}>{groupLabel}</Text>
+						</View>
+						<Text style={styles.zoneName}>{selectedZone?.label ?? "Select Zone"}</Text>
+						<Pressable
+							style={[styles.voiceBtn, voice.isListening && styles.voiceBtnActive]}
+							onPress={voice.toggle}
+						>
+							<Text style={styles.voiceBtnText}>{voice.isListening ? "MIC ON" : "MIC"}</Text>
+						</Pressable>
+					</View>
+
+					{/* ── FG Counter ── */}
+					<View style={styles.counterSection}>
+						<View style={styles.fgMain}>
+							<Text style={styles.fgCount}>
+								{zoneMade}
+								<Text style={styles.fgSlash}> / </Text>
+								{zoneAttempted}
+							</Text>
+							{zonePct !== null ? (
+								<Text style={[styles.fgPct, { color: groupColor }]}>{zonePct}%</Text>
+							) : (
+								<Text style={styles.fgPctEmpty}>---%</Text>
+							)}
+						</View>
+						<View style={styles.totalRow}>
+							<Text style={styles.totalLabel}>Total</Text>
+							<Text style={styles.totalValue}>
+								{totalStats.made}/{totalStats.attempted}
+								{totalPct !== null ? ` (${totalPct}%)` : ""}
+							</Text>
+							{session.shots.length > 0 && (
+								<Pressable onPress={handleUndo} style={styles.undoBtn}>
+									<Text style={styles.undoBtnText}>UNDO</Text>
+								</Pressable>
+							)}
+						</View>
+					</View>
+
+					{/* ── MADE / MISS Buttons ── */}
+					<View style={styles.buttonRow}>
+						<Pressable
+							style={({ pressed }) => [styles.shotBtn, styles.missBtn, pressed && styles.btnPressed]}
+							onPress={() => handleShot(false)}
+						>
+							<Text style={styles.shotBtnText}>MISS</Text>
+						</Pressable>
+						<Pressable
+							style={({ pressed }) => [styles.shotBtn, styles.madeBtn, pressed && styles.btnPressed]}
+							onPress={() => handleShot(true)}
+						>
+							<Text style={styles.shotBtnText}>MADE</Text>
+						</Pressable>
+					</View>
+
+					{/* ── Voice feedback ── */}
+					{voice.lastWord && (
+						<View style={styles.voiceFeedback}>
+							<Text style={styles.voiceFeedbackText}>
+								Heard: <Text style={styles.voiceFeedbackWord}>{voice.lastWord}</Text>
+							</Text>
+						</View>
+					)}
+
+					{/* ── Tags ── */}
+					<View style={styles.tagsSection}>
+						<Text style={styles.sectionLabel}>Tags</Text>
+						<View style={styles.tagChipRow}>
+							{selectedTagObjects.map((tag) => (
+								<Pressable
+									key={tag.id}
+									style={styles.tagChip}
+									onPress={() => toggleTag(tag.id)}
+								>
+									<Text style={styles.tagChipText}>#{tag.name}</Text>
+									<Text style={styles.tagChipRemove}> ×</Text>
+								</Pressable>
+							))}
+							<Pressable
+								style={styles.tagAddBtn}
+								onPress={() => setShowTagPicker(!showTagPicker)}
+							>
+								<Text style={styles.tagAddBtnText}>+ Add</Text>
+							</Pressable>
+						</View>
+
+						{showTagPicker && (
+							<View style={styles.tagPicker}>
+								<View style={styles.tagInputRow}>
+									<TextInput
+										style={styles.tagInput}
+										placeholder="New tag..."
+										placeholderTextColor="#555"
+										value={newTagName}
+										onChangeText={setNewTagName}
+										onSubmitEditing={handleCreateTag}
+										returnKeyType="done"
+									/>
+									{newTagName.trim().length > 0 && (
+										<Pressable style={styles.tagCreateBtn} onPress={handleCreateTag}>
+											<Text style={styles.tagCreateBtnText}>Create</Text>
+										</Pressable>
+									)}
+								</View>
+								{tags
+									.filter((t) => !session.tagIds.includes(t.id))
+									.map((tag) => (
+										<Pressable
+											key={tag.id}
+											style={styles.tagPickerItem}
+											onPress={() => {
+												toggleTag(tag.id);
+												setShowTagPicker(false);
+											}}
+										>
+											<Text style={styles.tagPickerItemText}>#{tag.name}</Text>
+										</Pressable>
+									))}
+							</View>
+						)}
+					</View>
+
+					{/* ── Memo ── */}
+					<View style={styles.memoSection}>
+						<Text style={styles.sectionLabel}>Memo</Text>
+						<TextInput
+							style={styles.memoInput}
+							placeholder="Practice notes..."
+							placeholderTextColor="#444"
+							multiline
+							defaultValue={session.memo}
+							onChangeText={handleMemoChange}
+							textAlignVertical="top"
+						/>
+					</View>
+				</ScrollView>
+			</KeyboardAvoidingView>
 		</>
 	);
 }
@@ -216,6 +388,9 @@ const styles = StyleSheet.create({
 	container: {
 		flex: 1,
 		backgroundColor: "#0a0a1a",
+	},
+	scrollContent: {
+		paddingBottom: 40,
 	},
 	error: { color: "#f55", fontSize: 18, textAlign: "center", marginTop: 40 },
 
@@ -228,12 +403,17 @@ const styles = StyleSheet.create({
 		paddingVertical: 8,
 	},
 	backBtn: {
-		paddingRight: 8,
+		backgroundColor: "rgba(255,255,255,0.06)",
+		borderRadius: 10,
+		borderWidth: 1,
+		borderColor: "rgba(255,255,255,0.08)",
+		paddingHorizontal: 12,
+		paddingVertical: 6,
 	},
 	backBtnText: {
 		color: "#3B82F6",
-		fontSize: 17,
-		fontWeight: "500",
+		fontSize: 15,
+		fontWeight: "600",
 	},
 	headerTitle: {
 		color: "#fff",
@@ -242,14 +422,16 @@ const styles = StyleSheet.create({
 		textAlign: "center",
 	},
 	endBtn: {
-		backgroundColor: "#c0392b",
-		paddingVertical: 5,
-		paddingHorizontal: 10,
-		borderRadius: 8,
+		backgroundColor: "rgba(239,68,68,0.25)",
+		borderWidth: 1,
+		borderColor: "rgba(239,68,68,0.3)",
+		paddingVertical: 6,
+		paddingHorizontal: 12,
+		borderRadius: 10,
 		alignItems: "center",
 	},
 	endBtnText: {
-		color: "#fff",
+		color: "#ef4444",
 		fontSize: 13,
 		fontWeight: "800",
 	},
@@ -263,9 +445,14 @@ const styles = StyleSheet.create({
 	zoneIndicator: {
 		flexDirection: "row",
 		alignItems: "center",
-		paddingHorizontal: 16,
+		marginHorizontal: 12,
+		paddingHorizontal: 14,
 		paddingVertical: 10,
 		gap: 10,
+		backgroundColor: "rgba(255,255,255,0.06)",
+		borderRadius: 14,
+		borderWidth: 1,
+		borderColor: "rgba(255,255,255,0.08)",
 	},
 	groupBadge: {
 		paddingHorizontal: 8,
@@ -288,13 +475,13 @@ const styles = StyleSheet.create({
 		paddingHorizontal: 12,
 		paddingVertical: 6,
 		borderRadius: 8,
-		backgroundColor: "#1a1a2e",
+		backgroundColor: "rgba(255,255,255,0.06)",
 		borderWidth: 1,
-		borderColor: "#333",
+		borderColor: "rgba(255,255,255,0.1)",
 	},
 	voiceBtnActive: {
-		backgroundColor: "#dc2626",
-		borderColor: "#dc2626",
+		backgroundColor: "rgba(220,38,38,0.3)",
+		borderColor: "rgba(220,38,38,0.4)",
 	},
 	voiceBtnText: {
 		color: "#fff",
@@ -352,8 +539,10 @@ const styles = StyleSheet.create({
 	undoBtn: {
 		paddingHorizontal: 8,
 		paddingVertical: 2,
-		borderRadius: 4,
-		backgroundColor: "#1a1a2e",
+		borderRadius: 6,
+		backgroundColor: "rgba(255,255,255,0.06)",
+		borderWidth: 1,
+		borderColor: "rgba(255,255,255,0.08)",
 	},
 	undoBtnText: {
 		color: "#888",
@@ -404,5 +593,114 @@ const styles = StyleSheet.create({
 	voiceFeedbackWord: {
 		color: "#aaa",
 		fontWeight: "700",
+	},
+
+	// Tags section
+	sectionLabel: {
+		color: "#888",
+		fontSize: 12,
+		fontWeight: "600",
+		marginBottom: 8,
+		textTransform: "uppercase",
+		letterSpacing: 0.5,
+	},
+	tagsSection: {
+		paddingHorizontal: 16,
+		marginTop: 16,
+	},
+	tagChipRow: {
+		flexDirection: "row",
+		flexWrap: "wrap",
+		gap: 6,
+	},
+	tagChip: {
+		flexDirection: "row",
+		backgroundColor: "rgba(59,130,246,0.2)",
+		borderRadius: 8,
+		paddingHorizontal: 10,
+		paddingVertical: 5,
+	},
+	tagChipText: {
+		color: "#3B82F6",
+		fontSize: 12,
+		fontWeight: "600",
+	},
+	tagChipRemove: {
+		color: "#3B82F6",
+		fontSize: 12,
+		fontWeight: "600",
+	},
+	tagAddBtn: {
+		backgroundColor: "rgba(255,255,255,0.06)",
+		borderRadius: 8,
+		borderWidth: 1,
+		borderColor: "rgba(255,255,255,0.08)",
+		paddingHorizontal: 10,
+		paddingVertical: 5,
+	},
+	tagAddBtnText: {
+		color: "#888",
+		fontSize: 12,
+		fontWeight: "600",
+	},
+	tagPicker: {
+		marginTop: 8,
+		backgroundColor: "rgba(255,255,255,0.06)",
+		borderRadius: 12,
+		borderWidth: 1,
+		borderColor: "rgba(255,255,255,0.08)",
+		padding: 10,
+		gap: 4,
+	},
+	tagInputRow: {
+		flexDirection: "row",
+		gap: 8,
+		marginBottom: 4,
+	},
+	tagInput: {
+		flex: 1,
+		color: "#fff",
+		fontSize: 14,
+		backgroundColor: "rgba(255,255,255,0.06)",
+		borderRadius: 8,
+		paddingHorizontal: 10,
+		paddingVertical: 6,
+	},
+	tagCreateBtn: {
+		backgroundColor: "rgba(59,130,246,0.2)",
+		borderRadius: 8,
+		paddingHorizontal: 12,
+		paddingVertical: 6,
+		justifyContent: "center",
+	},
+	tagCreateBtnText: {
+		color: "#3B82F6",
+		fontSize: 13,
+		fontWeight: "600",
+	},
+	tagPickerItem: {
+		paddingVertical: 8,
+		paddingHorizontal: 10,
+		borderRadius: 8,
+	},
+	tagPickerItemText: {
+		color: "#ccc",
+		fontSize: 14,
+	},
+
+	// Memo section
+	memoSection: {
+		paddingHorizontal: 16,
+		marginTop: 16,
+	},
+	memoInput: {
+		backgroundColor: "rgba(255,255,255,0.06)",
+		borderRadius: 12,
+		borderWidth: 1,
+		borderColor: "rgba(255,255,255,0.08)",
+		color: "#fff",
+		fontSize: 14,
+		padding: 12,
+		minHeight: 80,
 	},
 });

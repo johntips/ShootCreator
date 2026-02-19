@@ -23,6 +23,9 @@
 | デイリーFG | `DailyFG` | その日の全セッション合算FG |
 | セッション履歴 | `SessionHistory` | 過去セッションの一覧 |
 | 累計スタッツ | `AggregateStats` | 複数セッション横断の統計 |
+| タグ | `Tag` | セッションに付与する練習テーマラベル（例: #アンダードラックからのヘジテーション） |
+| アーカイブ | `Archive` | タグの論理削除（物理削除はしない） |
+| グループスタッツ | `GroupStats` | ゾーングループ別の集計結果 |
 | 制限区域 | `RestrictedArea` | ゴール下の半円エリア（RA） |
 | ペイント | `Paint` | キーエリア（RA除く） |
 | ミドルレンジ | `MidRange` | ペイント外〜3PTライン内 |
@@ -1159,6 +1162,8 @@ interface Session {
   shots: Shot[];
   startedAt: number;
   endedAt: number | null;  // null = 進行中
+  tagIds: string[];         // 付与されたタグのID配列
+  memo: string;             // フリーテキストメモ
 }
 
 /** Zone別の集計結果 */
@@ -1174,6 +1179,22 @@ interface TotalStats {
   attempted: number;
 }
 
+/** グループ別の集計結果 */
+interface GroupStats {
+  groupId: string;
+  label: string;
+  made: number;
+  attempted: number;
+}
+
+/** 練習テーマタグ */
+interface Tag {
+  id: string;
+  name: string;          // 例: "アンダードラックからのヘジテーション"
+  archived: boolean;     // true = 論理削除
+  createdAt: number;     // 作成日時
+}
+
 // ─── Repository Interface (Storage Layer Abstraction) ─────────
 
 /**
@@ -1187,4 +1208,887 @@ interface SessionRepository {
   getByDateRange(from: number, to: number): Promise<Session[]>;
   delete(id: string): Promise<void>;
 }
+
+/** タグの永続化インターフェース */
+interface TagRepository {
+  save(tag: Tag): Promise<void>;
+  getAll(): Promise<Tag[]>;             // archived含む全件
+  getActive(): Promise<Tag[]>;          // archived=false のみ
+  archive(id: string): Promise<void>;   // 論理削除
+  rename(id: string, name: string): Promise<void>;
+}
 ```
+
+---
+
+## 9. タグシステム（練習テーマ）
+
+### 概要
+
+セッションに「練習テーマ」タグを複数付与できる機能。
+例: `#アンダードラックからのヘジテーション`, `#キャッチ&シュート`, `#フリースロー強化`
+
+### ライフサイクル
+
+```
+┌─────────────┐    作成    ┌─────────────┐
+│  新規作成    │──────────→│   Active     │
+│ (テキスト入力)│           │  (使用可能)   │
+└─────────────┘           └─────────────┘
+                              │        │
+                         名前変更    アーカイブ
+                              │        │
+                              ▼        ▼
+                        ┌──────────┐ ┌──────────┐
+                        │ Active   │ │ Archived │
+                        │(名前変更後)│ │(論理削除) │
+                        └──────────┘ └──────────┘
+                                        │
+                                   ※ 物理削除なし
+                                   ※ 過去セッションの参照は維持
+```
+
+### セッションへのタグ付与フロー
+
+```
+┌──────────────────────────────────────────────┐
+│  ActiveSession 画面上部                        │
+│                                              │
+│  タグ: [#ヘジテーション ×] [#フリー ×] [+ 追加] │
+│                                              │
+│  [+ 追加] タップ → ボトムシート:                │
+│  ┌─────────────────────────────────┐         │
+│  │ 🔍 タグを検索 / 新規作成...       │         │
+│  │                                 │         │
+│  │ 最近のタグ:                      │         │
+│  │ ☑ #アンダードラックからのヘジテーション│        │
+│  │ ☐ #キャッチ&シュート              │         │
+│  │ ☐ #ステップバック                 │         │
+│  │ ☐ #フリースロー強化               │         │
+│  │                                 │         │
+│  │ "新しいタグ" が見つかりません       │         │
+│  │ [+ "新しいタグ" を作成]           │         │
+│  └─────────────────────────────────┘         │
+└──────────────────────────────────────────────┘
+```
+
+### タグ管理
+
+```
+Settings / Tag Management:
+┌──────────────────────────────────────┐
+│ ◀ Back      Tags                     │
+│                                      │
+│ Active Tags:                         │
+│ ┌──────────────────────────────────┐ │
+│ │ #アンダードラックからのヘジテーション │ │
+│ │                    [✏️] [📦]     │ │  ← 編集 / アーカイブ
+│ └──────────────────────────────────┘ │
+│ ┌──────────────────────────────────┐ │
+│ │ #キャッチ&シュート                 │ │
+│ │                    [✏️] [📦]     │ │
+│ └──────────────────────────────────┘ │
+│                                      │
+│ Archived:                            │
+│ ┌──────────────────────────────────┐ │
+│ │ #旧タグ名           (archived)   │ │
+│ └──────────────────────────────────┘ │
+└──────────────────────────────────────┘
+```
+
+### Stats タグフィルタリング
+
+```
+Stats 画面:
+┌────────────────────────────────┐
+│  Stats                         │
+│                                │
+│  [All Time] [30 Days] [7 Days] │  ← 期間フィルタ
+│                                │
+│  タグ: [All] [#ヘジテーション]    │  ← タグフィルタ
+│        [#キャッチ&シュート] ...   │     複数選択可
+│                                │
+│  ※ タグ選択時: そのタグが付いた   │
+│    セッションのみで集計          │
+│                                │
+│  Field Goal                    │
+│  42 / 98  43%                  │
+│  (...以下通常のスタッツ)         │
+└────────────────────────────────┘
+```
+
+### セッションメモ（フリーテキスト）
+
+```
+ActiveSession 画面（下スクロール時に表示）:
+┌──────────────────────────────────────────────┐
+│  (...コートマップ、カウンター、MADE/MISS...)     │
+│                                              │
+│  ── 下にスクロール ──                          │
+│                                              │
+│  タグ: [#ヘジテーション ×] [+ 追加]            │
+│                                              │
+│  メモ                                        │
+│  ┌──────────────────────────────────────────┐│
+│  │ 今日はドリブルからのプルアップを中心に。     ││
+│  │ 右手のリリースポイントが低い気がする。       ││
+│  │                                          ││
+│  └──────────────────────────────────────────┘│
+│  ※ 自動保存（入力ごとにセッションに保存）       │
+└──────────────────────────────────────────────┘
+
+History / Summary でのメモ表示:
+┌──────────────────────────────────┐
+│ 2/18 14:30   Basketball   43%   │
+│ #ヘジテーション #ステップバック     │  ← タグ (チップ表示)
+│ 右手のリリースポイントが低い...    │  ← メモ (1行目のみ)
+│ 42/98 shots                     │
+└──────────────────────────────────┘
+```
+
+### SQLite スキーマ
+
+```sql
+CREATE TABLE IF NOT EXISTS tags (
+  id TEXT PRIMARY KEY NOT NULL,
+  name TEXT NOT NULL,
+  archived INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+
+-- セッションの tagIds, memo は sessions テーブルに追加
+ALTER TABLE sessions ADD COLUMN tag_ids TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE sessions ADD COLUMN memo TEXT NOT NULL DEFAULT '';
+```
+
+---
+
+## 10. リキッドUI デザイントークン
+
+### カラーシステム
+
+```
+背景レイヤー:
+  Layer 1 (Base):     #0a0a1a
+  Layer 2 (Gradient):  LinearGradient(#1a1a3e → #0a0a1a → #0d1117)
+  Layer 3 (Card):     rgba(255,255,255,0.06)
+
+ボーダー:
+  Card Border:        rgba(255,255,255,0.08)
+  Tab Bar Border:     rgba(255,255,255,0.12)
+
+テキスト:
+  Primary:            #ffffff
+  Secondary:          #888888
+  Tertiary:           #555555
+  Accent:             #3B82F6
+
+アクセント:
+  Blue:               #3B82F6
+  Green:              #22c55e / rgba(34,197,94,0.25)
+  Red:                #ef4444 / rgba(239,68,68,0.25)
+```
+
+### Glass Card
+
+```
+backgroundColor:   rgba(255,255,255,0.06)
+borderRadius:      16
+borderWidth:       1
+borderColor:       rgba(255,255,255,0.08)
+padding:           16
+```
+
+### Glass Button（セッション画面のENDボタン等）
+
+```
+backgroundColor:   rgba(カラー, 0.25)
+borderWidth:       1
+borderColor:       rgba(カラー, 0.3)
+borderRadius:      10
+```
+
+### ソリッドボタン（MADE / MISS）
+
+```
+MADE:  backgroundColor: #27ae60 (ソリッド緑)
+MISS:  backgroundColor: #c0392b (ソリッド赤)
+borderRadius:      16
+```
+
+### Tab Bar
+
+```
+backgroundColor:   transparent
+BlurView:          intensity=80, tint="dark"
+Gradient overlay:  rgba(26,26,62,0.6) → rgba(10,10,26,0.8)
+Top border:        rgba(255,255,255,0.12) (hairline)
+```
+
+---
+
+## 11. iPhone タブナビゲーション構成
+
+### ファイル構造
+
+```
+src/app/
+├── _layout.tsx              ← Root Stack (タブ + モーダル)
+├── (tabs)/
+│   ├── _layout.tsx          ← Tabs レイアウト（3タブ + BlurView）
+│   ├── index.tsx            ← Home（スポーツ選択 + クイックスタート）
+│   ├── history.tsx          ← セッション履歴（スポーツラベル付き）
+│   └── stats.tsx            ← トータルスタッツ（タグフィルタ付き）
+├── session/
+│   └── [sport].tsx          ← セッション画面（タブ外、フルスクリーン）
+├── summary/
+│   └── [id].tsx             ← セッションサマリー（タブ外）
+└── tags.tsx                 ← タグ管理画面
+```
+
+### タブ定義
+
+| タブ | ラベル | 画面 |
+|------|--------|------|
+| 1 | Home | スポーツ選択 + クイックスタート |
+| 2 | History | セッション一覧（日時・スポーツ・FG%） |
+| 3 | Stats | 累計スタッツ + タグフィルタ + コートヒートマップ |
+
+---
+
+## 12. Watch ミニコートマップ設計
+
+### 概要
+
+Watch のサブゾーン選択（2段目）で、リスト選択の代わりにグループごとにズームしたコート断面を表示。
+ゾーンの形状をビジュアルで確認しながら選択できる。
+
+### 座標系
+
+iPhone の viewBox 300×320 座標を使用。グループごとにクロップ矩形を定義し、
+GeometryReader で Watch 画面にスケーリング。
+
+```
+グループ        クロップ (x, y, w, h)     理由
+─────────────────────────────────────────────────────
+INSIDE          (100, 0, 100, 80)         RA周辺を拡大
+PAINT           (80, 0, 140, 145)         ペイント全体 + RA コンテキスト
+MID-RANGE       (0, 0, 300, 230)          全幅必要（ベースライン〜エルボー）
+3-POINT         (0, 0, 300, 280)          ほぼフルコート
+DEEP            (0, 250, 300, 70)         ハーフコート線〜底辺
+```
+
+### SVG Path → SwiftUI Path 変換
+
+```
+SVGコマンド   → SwiftUI Path メソッド
+─────────────────────────────────────
+M x,y        → path.move(to: transform(x,y))
+L x,y        → path.addLine(to: transform(x,y))
+Q cx,cy x,y  → path.addQuadCurve(to: transform(x,y),
+                                  control: transform(cx,cy))
+A rx,ry ...  → RA弧のみ: path.addArc(center: transform(150,40),
+                                       radius: scaledR, ...)
+Z            → path.closeSubpath()
+```
+
+### Watch ミニコート ASCII
+
+```
+INSIDE (拡大):              PAINT (拡大):
+┌────────────────┐         ┌──────────────────┐
+│   ┌─────┬─────┐│         │  ┌──────┬──────┐  │
+│   │ RAL │ RAR ││         │  │  PL  │  PR  │  │
+│   │     │     ││         │  │      │      │  │
+│   │ 3/5 │ 4/6 ││         │  │ ┌──┬──┐    │  │
+│   │ 60% │ 67% ││         │  │ │RA│RA│    │  │
+│   └─────┴─────┘│         │  │ └──┴──┘    │  │
+│    ↑タップで選択 │         │  └──────┴──────┘  │
+└────────────────┘         └──────────────────┘
+
+MID-RANGE:                  3-POINT:
+┌──────────────────┐       ┌──────────────────┐
+│  ・   ・   ・  ・  │       │                  │
+│    ┌──────────┐  │       │ LC3 ABL ABC ABR RC3│
+│ LBL│LE  FT  RE│RBL│       │                  │
+│    │          │  │       │    ┌──────────┐   │
+│    │  ┌────┐  │  │       │    │ (mid内)   │   │
+│ LW │  │(RA)│  │ RW│       │    └──────────┘   │
+│    └──┴────┴──┘  │       └──────────────────┘
+└──────────────────┘
+
+DEEP:
+┌──────────────────┐
+│  DL  │  DC  │  DR│
+│      │      │    │
+└──────────────────┘
+```
+
+### ゾーン描画ルール
+
+```
+選択対象ゾーン:   グループ色 opacity(0.4) + 白枠線
+選択中ゾーン:     グループ色 opacity(0.7) + 太い白枠 + グロー
+他グループゾーン:  rgba(255,255,255,0.06) (コンテキスト表示)
+コートライン:     白 opacity(0.3) (非インタラクティブ)
+
+ゾーン内テキスト:
+  shortLabel (小さめ)
+  m/n (データあり時)
+```
+
+### ファイル構成
+
+```
+targets/watch/MiniCourtView.swift   (新規)
+  ├── CourtViewport struct          — グループ別クロップ矩形
+  ├── parseSVGPath()               — SVG path文字列 → SwiftUI Path
+  ├── MiniCourtView                — メインView
+  ├── CourtLinesView               — コートライン描画
+  └── zoneFillColor()              — FG%ヒートマップ色
+
+targets/watch/ZoneMapView.swift     (変更)
+  └── ZoneSubListView → MiniCourtView に差し替え
+```
+
+---
+
+## 13. Watch <-> iPhone 双方向リアルタイム同期
+
+### 概要
+
+Apple Watch (SwiftUI) と iPhone (React Native) 間の双方向リアルタイムシュートデータ同期。
+3つの WatchConnectivity チャネルを用途別に使い分け、Eventually Consistent モデルで信頼性を確保する。
+
+### レイヤードアーキテクチャ
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Presentation  (apps/mobile/src/app/session/)               │
+│    [sport].tsx — useWatchSync() で双方向同期                  │
+├─────────────────────────────────────────────────────────────┤
+│  Feature  (apps/mobile/src/features/sync/)                  │
+│    SyncService.ts   — オーケストレーション、dedup、チャネル選択  │
+│    useWatchSync.ts  — React hook（セッション画面が消費）       │
+├─────────────────────────────────────────────────────────────┤
+│  Infrastructure  (apps/mobile/src/infra/)                   │
+│    watchBridge.ts — 型付き WatchConnectivity ラッパー         │
+│                     ビジネスロジックなし、送受信のみ            │
+├─────────────────────────────────────────────────────────────┤
+│  Domain  (packages/core/src/)                               │
+│    types.ts — SyncShot, SyncMessage 型定義                   │
+│    sync.ts  — createShotId(), isDuplicate(),                │
+│               deriveStatsSyncPayload()                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 同期プロトコル
+
+| データ種別 | 主チャネル | 補助 | 方向 | 備考 |
+|-----------|-----------|------|------|------|
+| ショット | transferUserInfo | sendMessage | 双方向 | shotId UUID で重複排除 |
+| ゾーン変更 | applicationContext | sendMessage | 双方向 | last-write-wins |
+| スタッツ同期 | applicationContext | — | iPhone→Watch | 最新スナップショット上書き |
+| セッション開始 | transferUserInfo | sendMessage | iPhone→Watch | iPhone がマスター |
+| セッション終了 | transferUserInfo | sendMessage | iPhone→Watch | iPhone がマスター |
+
+### メッセージエンベロープ
+
+```typescript
+// 全メッセージは type フィールドで識別
+{ type: "shot",          shotId, zoneId, made, timestamp, source }
+{ type: "zone-change",   zoneId, timestamp }
+{ type: "stats-sync",    zones: [{zoneId, made, attempted}...] }
+{ type: "session-start", sessionId, sportId, startedAt }
+{ type: "session-end",   sessionId, endedAt }
+```
+
+### 重複排除戦略
+
+- 各ショットに `shotId` (UUID: `${timestamp}-${random6}`) を付与
+- 送信側: transferUserInfo（確実） + sendMessage（高速）のデュアル送信
+- 受信側: `Set<string>` で shotId を記録、2度目以降は破棄
+- `source` フィールド ("iphone" | "watch") で自デバイス発エコーを拒否
+- セッション終了時に dedup Set をクリア
+
+### 競合解決
+
+| 競合シナリオ | 解決方針 |
+|------------|---------|
+| 両デバイスで同時ショット | 各ショットは独立 shotId → 両方とも記録 |
+| 両デバイスで同時ゾーン変更 | last-write-wins (applicationContext 仕様) |
+| 通信途絶中のショット | transferUserInfo がキューイング → 復旧時に自動配信 |
+| Watch が iPhone セッション外でショット | Watch ローカルに記録 |
+
+### シーケンス図
+
+```
+iPhone                              Watch
+  │                                   │
+  │ ─── session-start ──────────────→ │  transferUserInfo + sendMessage
+  │                                   │
+  │ ◀── shot {shotId:"w1"} ──────── │  transferUserInfo + sendMessage
+  │   dedup "w1" → addShot()         │
+  │   syncStats() ────────────────→  │  applicationContext
+  │                                   │
+  │ shot {shotId:"i1"} ─────────→   │  transferUserInfo + sendMessage
+  │                                   │  dedup "i1" → recordRemoteShot()
+  │                                   │
+  │ zone-change "ABC" ────────────→  │  applicationContext + sendMessage
+  │                                   │  selectedZoneId = "ABC"
+  │                                   │
+  │ ◀── zone-change "FT" ─────────  │  applicationContext
+  │   selectedZoneId = "FT"          │
+  │                                   │
+  │ ─── session-end ─────────────→   │  transferUserInfo + sendMessage
+  │                                   │
+```
+
+### ファイル構成
+
+```
+packages/core/src/
+  types.ts         (変更) SyncShot, ShotMessage, SyncMessage 型追加
+  sync.ts          (新規) createShotId, isDuplicate, deriveStatsSyncPayload
+  index.ts         (変更) 新規エクスポート追加
+
+apps/mobile/src/infra/
+  watchBridge.ts   (書き直し) 型付き WatchConnectivity ラッパー
+
+apps/mobile/src/features/sync/
+  SyncService.ts   (新規) 同期オーケストレーター
+  useWatchSync.ts  (新規) React hook
+
+apps/mobile/src/app/session/
+  [sport].tsx      (変更) useWatchSync 統合
+
+targets/watch/
+  WatchConnectivityManager.swift  (変更) shotId, iPhone ショット受信, dedup
+  SessionState.swift              (変更) recordRemoteShot, Notification
+```
+
+### 13.1 Watch 非接続時の安全性（Graceful Degradation）
+
+#### 問題
+
+Watch 同期レイヤーが iPhone のコア動作（セッション開始/ショット記録）をブロック・クラッシュさせる可能性がある。
+
+| 障害パターン | 原因 | 影響 |
+|------------|------|------|
+| Watch 未インストール時の transferUserInfo | ネイティブ側で nil → NSDictionary クラッシュ (RNWatch バグ) | **アプリ強制終了** |
+| WCSession 未アクティベート時の送信 | セッション開始直後に同期呼び出し | クラッシュ |
+| Promise rejection 未処理 | fire-and-forget で async 関数を呼ぶ | 警告/潜在的クラッシュ |
+
+#### 設計原則
+
+> **iPhone 単体動作が最優先。Watch 同期は Best-effort のオプション機能。同期の失敗がコア機能を阻害してはならない。**
+
+#### 解決策
+
+1. **Infrastructure 層 (watchBridge.ts)**: 全送信関数を `getIsWatchAppInstalled()` ガードで保護。失敗時は silent return。
+2. **Feature 層 (SyncService.ts)**: 全 public メソッドを try-catch で保護。エラーは console.warn で記録するのみ。
+3. **Hook 層 (useWatchSync.ts)**: 同期呼び出しを fire-and-forget（void キャスト）で実行。メインの状態更新フローをブロックしない。
+4. **Presentation 層 ([sport].tsx)**: ショット記録・ゾーン変更のローカル処理を先に実行し、Watch 同期は後続の副作用として実行。
+
+### 13.2 同期デバッグログ仕様
+
+#### 目的
+
+Watch ↔ iPhone 通信の状態を可視化し、同期問題のデバッグを容易にする。
+ログは iPhone 側（Metro コンソール）と Watch 側（Xcode コンソール）の両方に出力。
+
+#### ログカテゴリ
+
+| カテゴリ | プレフィックス | 出力場所 | 内容 |
+|---------|-------------|---------|------|
+| 接続状態 | `[WSync:Conn]` | 両方 | WCSession activation、reachability 変化、paired/installed 状態 |
+| 送信 | `[WSync:Send]` | 送信側 | チャネル種別、メッセージ type、成功/失敗、Watch 未インストール skip |
+| 受信 | `[WSync:Recv]` | 受信側 | チャネル種別、メッセージ type、dedup 結果 |
+| ライフサイクル | `[WSync:Life]` | 両方 | SyncService start/stop、セッション開始/終了 |
+
+#### iPhone 側ログ実装
+
+```
+Infrastructure 層 (watchBridge.ts):
+  送信時: [WSync:Send] reliable shot {shotId} → queued
+  送信時: [WSync:Send] realtime shot {shotId} → sent / skipped (not reachable)
+  送信時: [WSync:Send] context stats → sent / skipped (not installed)
+  受信時: [WSync:Recv] message {type} from watch
+  受信時: [WSync:Recv] user-info [{type}...] from watch
+  受信時: [WSync:Recv] app-context {type} from watch
+
+Feature 層 (SyncService.ts):
+  起動時: [WSync:Life] SyncService started (session: {id})
+  停止時: [WSync:Life] SyncService stopped
+  dedup: [WSync:Recv] shot {shotId} → accepted / duplicate / echo
+```
+
+#### Watch 側ログ実装 (Swift)
+
+```
+WatchConnectivityManager.swift:
+  接続: [WSync:Conn] session activated, reachable={bool}
+  接続: [WSync:Conn] reachability changed → {bool}
+  送信: [WSync:Send] transferUserInfo shot {shotId}
+  送信: [WSync:Send] sendMessage shot {shotId} → sent / skipped
+  受信: [WSync:Recv] {channel} {type} from iPhone
+  dedup: [WSync:Recv] shot {shotId} → accepted / duplicate / echo
+```
+
+#### ログレベル
+
+- `__DEV__` (iPhone) / `#if DEBUG` (Watch) でのみ出力
+- リリースビルドにはログを含めない
+
+### 13.3 セッションライフサイクル — iPhone マスター方式
+
+#### 設計原則
+
+> **セッションの開始・終了は必ず iPhone から行う。Watch は iPhone セッションのコンパニオンとして動作する。**
+
+これにより状態の不整合（Watch だけショットが溜まる、iPhone と Watch で別セッションが走る等）を防ぐ。
+
+#### Watch 側のセッション状態
+
+```
+enum WatchSessionPhase {
+    case idle       // iPhone セッション未開始 → ショット入力不可
+    case active     // iPhone セッション中 → ショット入力可、双方向同期
+}
+```
+
+#### 状態遷移
+
+```
+Watch 起動 → idle
+  ↓ iPhone から session-start 受信
+active (ショット入力可)
+  ↓ iPhone から session-end 受信
+idle (カウントリセット)
+```
+
+#### Watch UI の変化
+
+| フェーズ | 表示 |
+|---------|------|
+| idle | 「iPhone でセッションを開始してください」メッセージ + ゾーン一覧は表示（閲覧のみ） |
+| active | 通常のショット入力 UI（MADE/MISS ボタン有効） |
+
+#### Watch → iPhone のショット送信条件
+
+Watch がショットを送信するのは `active` フェーズのみ。`idle` フェーズでは MADE/MISS ボタンを無効化し、ローカル記録も iPhone 送信も行わない。
+
+### 13.4 セッションライフサイクル ハンドシェイクフロー
+
+#### 全体シーケンス
+
+```
+iPhone                                    Watch
+  │                                         │
+  │ [App Launch]                            │ [App Launch]
+  │ WCSession.activate()                    │ WCSession.activate()
+  │                                         │
+  │ activationDidComplete                   │ activationDidComplete
+  │ (paired:YES, reachable:?)               │ (activated, reachable:?)
+  │                                         │
+  │ ←── reachabilityDidChange(true) ────→ │  (双方向)
+  │                                         │
+  │ [Home 画面]                              │ [idle: "iPhoneでセッションを
+  │                                         │        開始してください"]
+  │                                         │
+  │ ──── ① User taps Basketball ────────  │
+  │ createSession(id, sportId, startedAt)   │
+  │ useWatchSync mount                      │
+  │ SyncService.start() → listeners 登録   │
+  │                                         │
+  │ ──── ② session-start ──────────────→ │  sendMessage (primary)
+  │      {type, sessionId, sportId,         │  + applicationContext (backup)
+  │       startedAt}                        │
+  │                                         │  handleIncoming("session-start")
+  │                                         │  → isSessionActive = true
+  │                                         │  → zoneCounts.removeAll()
+  │                                         │  [active: ゾーン選択画面]
+  │                                         │
+  │ ──── ③ Shot (iPhone → Watch) ──────→ │  sendMessage + applicationContext
+  │      {type:"shot", shotId, zoneId,      │  handleIncoming → recordRemoteShot
+  │       made, source:"iphone"}            │
+  │                                         │
+  │ ←──── ④ Shot (Watch → iPhone) ──────  │  transferUserInfo + sendMessage
+  │ handleIncoming → addShot()              │  {type:"shot", shotId, zoneId,
+  │ syncStats() → applicationContext ───→ │   made, source:"watch"}
+  │                                         │  mergeStatsFromiPhone
+  │                                         │
+  │ ──── ⑤ Zone Change ───────────────→  │  applicationContext + sendMessage
+  │ ←──── Zone Change ─────────────────  │  applicationContext
+  │                                         │
+  │ ──── ⑥ User taps END ─────────────→ │  sendMessage + applicationContext
+  │      {type:"session-end",               │  handleIncoming("session-end")
+  │       sessionId, endedAt}               │  → isSessionActive = false
+  │                                         │  [idle: "iPhoneでセッションを
+  │                                         │        開始してください"]
+```
+
+#### チャネル安全性マトリクス
+
+| チャネル | Watch 未インストール時 | reachable=false 時 | 用途 |
+|---------|---------------------|-------------------|------|
+| `sendMessage` | silent fail | 送信不可 | **Primary**: session-start/end, shots |
+| `applicationContext` | silent fail | キュー → 再接続時配信 | **Backup**: session-start/end, zone, stats |
+| `transferUserInfo` | **ネイティブクラッシュ** | キュー → 再接続時配信 | Watch→iPhone のみ使用 |
+
+#### iPhone → Watch 送信戦略
+
+`transferUserInfo` はネイティブクラッシュリスクがあるため、iPhone → Watch では使用しない。
+
+```
+session-start/end:
+  1. sendMessage  (即時配信、reachable 時)
+  2. applicationContext (バックアップ、last-write-wins)
+
+shot:
+  1. sendMessage  (即時配信、reachable 時)
+  2. applicationContext (stats スナップショットで上書き)
+
+zone-change:
+  1. applicationContext (最新値上書き)
+  2. sendMessage  (即時配信補助)
+
+stats-sync:
+  1. applicationContext (スナップショット上書き)
+```
+
+#### Watch → iPhone 送信戦略
+
+Watch 側は `transferUserInfo` が安全に使える（iPhone は常にインストール済み）。
+
+```
+shot:
+  1. transferUserInfo  (確実なキュー配信)
+  2. sendMessage       (即時配信補助)
+
+zone-change:
+  1. applicationContext (最新値上書き)
+```
+
+#### ハンドシェイク: Watch-initiated 方式
+
+シミュレーターでは iPhone → Watch の `sendMessage` が失敗する場合がある
+（iPhone WCSession が `appInstalled: NO, reachable: NO` を報告）。
+一方、Watch → iPhone は正常に動作する。
+
+この非対称性を解消するため、**Watch から iPhone にハンドシェイクを開始**する方式を採用:
+
+```
+Watch                                     iPhone
+  │                                         │
+  │ [起動 + WCSession activated]            │
+  │                                         │
+  │ ──── watch-ready ────────────────────→ │  sendMessage + replyHandler
+  │      {type: "watch-ready"}              │
+  │                                         │  iPhone は現在のセッション状態を返信
+  │ ←── reply ──────────────────────────  │  {hasActiveSession, sessionId?,
+  │                                         │   sportId?, startedAt?}
+  │ hasActiveSession == true                │
+  │ → isSessionActive = true                │
+  │ [active: ゾーン選択画面]                  │
+  │                                         │
+  │ ──── (セッション中ショット双方向) ──→    │
+  │ ←── (セッション中ショット双方向) ────    │
+  │                                         │
+  │                                         │  [User taps END]
+  │ ←── session-end (sendMessage) ──────  │
+  │ → isSessionActive = false               │
+  │ [idle 画面]                              │
+```
+
+#### セッション状態の伝播チャネル
+
+| イベント | Primary | Backup | 方向 |
+|---------|---------|--------|------|
+| Watch 起動時 | Watch → iPhone `sendMessage` + reply | — | Watch → iPhone |
+| セッション開始 | iPhone → Watch `sendMessage` | Watch 定期ポーリング (5s) | iPhone → Watch |
+| セッション終了 | iPhone → Watch `sendMessage` | Watch 定期ポーリング (5s) | iPhone → Watch |
+| ショット | `sendMessage` 双方向 | — | 双方向 |
+| ゾーン変更 | `applicationContext` + `sendMessage` | — | 双方向 |
+| スタッツ | `applicationContext` | — | iPhone → Watch |
+
+### 13.5 コネクション状態ページ
+
+#### 目的
+
+Watch ↔ iPhone の通信確立状況をユーザーに可視化し、同期が機能しない場合のトラブルシューティングを支援する。
+
+#### iPhone 側: Watch タブ
+
+既存の tabs に「Watch」タブを追加。SF Symbol: `applewatch`
+
+```
+┌──────────────────────────┐
+│ Watch Connection         │
+│                          │
+│  ● 接続中 / ○ 未接続     │  ← isReachable
+│                          │
+│  ┌─────────────────────┐ │
+│  │ WCSession 状態      │ │
+│  │                     │ │
+│  │ Paired:    YES / NO │ │
+│  │ Installed: YES / NO │ │
+│  │ Reachable: YES / NO │ │
+│  │ Activated: YES / NO │ │
+│  └─────────────────────┘ │
+│                          │
+│  ┌─────────────────────┐ │
+│  │ 同期ステータス       │ │
+│  │                     │ │
+│  │ ハンドシェイク: ✓/✗  │ │
+│  │ 最終同期: 12:34:56  │ │
+│  │ 送信待ち: 0件       │ │
+│  └─────────────────────┘ │
+│                          │
+│  [手動ハンドシェイク]     │  ← ボタン
+└──────────────────────────┘
+```
+
+**技術実装:**
+- ファイル: `apps/mobile/src/app/(tabs)/watch.tsx`
+- `react-native-watch-connectivity` から直接 WCSession 状態を取得
+- `watchEvents.on("reachability")` でリアルタイム更新
+- `getIsPaired()`, `getIsWatchAppInstalled()`, `getReachability()` をポーリング (5秒間隔)
+
+#### Watch 側: コネクション詳細
+
+IdleView 内に既存の接続インジケータを拡張。
+
+```
+┌──────────────────────┐
+│   📱                  │
+│                      │
+│  iPhoneでセッションを │
+│  開始してください     │
+│                      │
+│  ● 接続中            │  ← isReachable
+│  Activation: ✓       │  ← activationState
+│  Handshake: idle     │  ← lastHandshakeResult
+│                      │
+│  [再接続]            │  ← sendWatchReady() 再実行
+└──────────────────────┘
+```
+
+**技術実装:**
+- `WatchConnectivityManager` の `@Published` プロパティを IdleView で表示
+- `activationState`, `isReachable`, `lastHandshakeResult`
+- 「再接続」ボタンで `sendWatchReady()` を手動実行可能
+
+### 13.6 Watch セッションライフサイクル＆画面状態
+
+#### 設計原則
+
+Watch は常に iPhone のセッション状態を**サブスクライブ**し、2つの状態のみを持つ。
+状態遷移の起点は常に iPhone 側。Watch は自発的に状態を変更しない。
+
+#### 制約: Watch はセッション制御不可
+
+- Watch にはセッション開始/終了のボタンやメソッドを一切設けない
+- `SessionState.isSessionActive` は iPhone からの Notification でのみ変更される
+- `recordShot()` は `guard isSessionActive` で idle 中のショット記録をブロック
+- Watch → iPhone 方向のセッション開始/終了メッセージ送信メソッドは存在しない
+
+#### Watch 側 2 状態
+
+| 状態 | 条件 | 表示画面 |
+|------|------|---------|
+| `idle` | iPhone セッション未開始 or 終了済 | IdleView: 待機画面＋コネクション状態 |
+| `active` | iPhone セッション進行中 | ZoneMapView → CounterView: ショット入力 |
+
+#### ステートマシン
+
+```
+                   ┌─────────┐
+    ─── App起動 ──→│  idle   │←──────────────────────┐
+                   └────┬────┘                        │
+                        │                             │
+          ┌─────────────┴─────────────┐               │
+          │ Notification:             │               │
+          │ .sessionStartedFromiPhone │               │
+          │ OR                        │               │
+          │ watch-ready reply:        │               │
+          │ hasActiveSession == true  │               │
+          └─────────────┬─────────────┘               │
+                        ▼                             │
+                   ┌─────────┐                        │
+                   │ active  │────────────────────────┘
+                   └─────────┘   Notification:
+                                 .sessionEndedFromiPhone
+```
+
+#### 状態通知のチャネル
+
+Watch が iPhone のセッション状態を受け取る経路は3つ:
+
+| 経路 | タイミング | メッセージ |
+|------|-----------|-----------|
+| watch-ready reply | Watch 起動時 / reachable 変化時 | `{hasActiveSession, sessionId?, ...}` |
+| sendMessage | iPhone セッション開始/終了時 | `{type: "session-start"}` / `{type: "session-end"}` |
+| applicationContext | iPhone セッション開始/終了時 (backup) | `{activeSessionId: "..." or null}` |
+
+#### シーケンス図: セッション開始 → 終了
+
+```
+iPhone                                Watch
+  │                                     │
+  │ [ユーザーがセッション開始]           │ [idle 画面]
+  │                                     │
+  │ ── session-start (sendMessage) ───→ │
+  │ ── session-start (appContext) ────→ │
+  │                                     │ .sessionStartedFromiPhone
+  │                                     │ isSessionActive = true
+  │                                     │ [active: ZoneMapView]
+  │                                     │
+  │ ←── shot (transferUserInfo) ────── │ [ユーザーがショット記録]
+  │ ── shot (sendMessage) ────────────→ │ [ユーザーがショット記録]
+  │ ── stats (appContext) ────────────→ │ [カウンター更新]
+  │                                     │
+  │ [ユーザーがセッション終了]           │
+  │                                     │
+  │ ── session-end (sendMessage) ─────→ │
+  │ ── session-end (appContext) ──────→ │
+  │                                     │ .sessionEndedFromiPhone
+  │                                     │ isSessionActive = false
+  │                                     │ [idle 画面に戻る]
+```
+
+#### Watch 画面構成
+
+```swift
+ContentView
+├── idle (isSessionActive == false)
+│   └── IdleView
+│       ├── "iPhoneでセッションを開始してください"
+│       ├── コネクション状態 (●接続中 / ●未接続)
+│       ├── Activation / Handshake 詳細
+│       └── [再接続] ボタン
+│
+└── active (isSessionActive == true)
+    ├── showZones == true
+    │   └── ZoneMapView → ゾーン選択
+    └── showZones == false
+        └── CounterView → MADE/MISS ボタン
+```
+
+#### 技術実装
+
+**SessionState.swift（状態管理）:**
+- `@Published var isSessionActive: Bool = false` — 唯一の状態フラグ
+- `.sessionStartedFromiPhone` → `isSessionActive = true` + カウントリセット
+- `.sessionEndedFromiPhone` → `isSessionActive = false`
+- `recordShot()` は `isSessionActive` をガード（idle 中は無効）
+
+**WatchConnectivityManager.swift（通知受信）:**
+- `handleIncoming()` で `session-start` / `session-end` を検出
+- `NotificationCenter.default.post()` で SessionState に通知
+- `applicationContext` 経由の `activeSessionId` でも session-start をトリガー
+- `sendWatchReady()` reply で `hasActiveSession == true` → `.sessionStartedFromiPhone` 通知
+
+**ContentView.swift（画面切り替え）:**
+- `session.isSessionActive` を `@EnvironmentObject` で監視
+- `false` → IdleView / `true` → ZoneMapView or CounterView

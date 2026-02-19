@@ -45,6 +45,16 @@ export interface Session {
 	shots: Shot[];
 	startedAt: number;
 	endedAt: number | null;
+	tagIds: string[];
+	memo: string;
+}
+
+/** 練習テーマタグ */
+export interface Tag {
+	id: string;
+	name: string;
+	archived: boolean;
+	createdAt: number;
 }
 
 /** Zone別の集計結果 */
@@ -58,6 +68,63 @@ export interface ZoneStats {
 export interface TotalStats {
 	made: number;
 	attempted: number;
+}
+
+/** グループ別の集計結果 */
+export interface GroupStats {
+	groupId: string;
+	label: string;
+	made: number;
+	attempted: number;
+}
+
+// ─── Sync Types (Watch <-> iPhone) ────────────────────────────
+
+/** ショット + デバイス間同期用メタデータ */
+export interface SyncShot extends Shot {
+	shotId: string;
+	source: "iphone" | "watch";
+}
+
+/** 同期メッセージエンベロープ */
+export type SyncMessage =
+	| ShotMessage
+	| ZoneChangeMessage
+	| StatsSyncMessage
+	| SessionStartMessage
+	| SessionEndMessage;
+
+export interface ShotMessage {
+	type: "shot";
+	shotId: string;
+	zoneId: string;
+	made: boolean;
+	timestamp: number;
+	source: "iphone" | "watch";
+}
+
+export interface ZoneChangeMessage {
+	type: "zone-change";
+	zoneId: string;
+	timestamp: number;
+}
+
+export interface StatsSyncMessage {
+	type: "stats-sync";
+	zones: ZoneStats[];
+}
+
+export interface SessionStartMessage {
+	type: "session-start";
+	sessionId: string;
+	sportId: string;
+	startedAt: number;
+}
+
+export interface SessionEndMessage {
+	type: "session-end";
+	sessionId: string;
+	endedAt: number;
 }
 
 // ─── Repository Interface (Storage Layer Abstraction) ─────────
@@ -77,4 +144,13 @@ export interface SessionRepository {
 	getByDateRange(from: number, to: number): Promise<Session[]>;
 	/** 削除 */
 	delete(id: string): Promise<void>;
+}
+
+/** タグ永続化インターフェース */
+export interface TagRepository {
+	save(tag: Tag): Promise<void>;
+	getAll(): Promise<Tag[]>;
+	getActive(): Promise<Tag[]>;
+	archive(id: string): Promise<void>;
+	rename(id: string, name: string): Promise<void>;
 }

@@ -13,9 +13,11 @@ struct ZoneCount: Identifiable {
 }
 
 /// セッション状態管理（19ゾーン対応）
+/// セッション開始は iPhone からのみ。Watch はコンパニオン。
 class SessionState: ObservableObject {
     @Published var selectedZoneId: String = "restricted-area-left"
     @Published var zoneCounts: [String: ZoneCount] = [:]
+    @Published var isSessionActive: Bool = false
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -35,6 +37,34 @@ class SessionState: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] data in
                 self?.mergeStatsFromiPhone(data)
+            }
+            .store(in: &cancellables)
+
+        // iPhone → Watch のショット受信
+        NotificationCenter.default.publisher(for: .shotReceivedFromiPhone)
+            .compactMap { $0.userInfo as? [String: Any] }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] data in
+                guard let zoneId = data["zoneId"] as? String,
+                      let made = data["made"] as? Bool else { return }
+                self?.recordRemoteShot(zoneId: zoneId, made: made)
+            }
+            .store(in: &cancellables)
+
+        // セッション開始 — カウントリセット＆アクティブ化
+        NotificationCenter.default.publisher(for: .sessionStartedFromiPhone)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.zoneCounts.removeAll()
+                self?.isSessionActive = true
+            }
+            .store(in: &cancellables)
+
+        // セッション終了 — idle に戻す
+        NotificationCenter.default.publisher(for: .sessionEndedFromiPhone)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.isSessionActive = false
             }
             .store(in: &cancellables)
     }
@@ -73,10 +103,19 @@ class SessionState: ObservableObject {
     }
 
     func recordShot(made: Bool) {
+        guard isSessionActive else { return }
         var count = zoneCounts[selectedZoneId] ?? ZoneCount(id: selectedZoneId)
         if made { count.made += 1 }
         count.attempted += 1
         zoneCounts[selectedZoneId] = count
+    }
+
+    /// iPhone から受信したリモートショットを記録
+    func recordRemoteShot(zoneId: String, made: Bool) {
+        var count = zoneCounts[zoneId] ?? ZoneCount(id: zoneId)
+        if made { count.made += 1 }
+        count.attempted += 1
+        zoneCounts[zoneId] = count
     }
 
     /// グループ内の集計

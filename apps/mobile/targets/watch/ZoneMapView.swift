@@ -105,83 +105,8 @@ struct ZoneGroupListView: View {
     }
 }
 
-// ━━ サブゾーン選択（2段階目）— 各ゾーンのスタッツ付き ━━
-
-struct ZoneSubListView: View {
-    @EnvironmentObject var session: SessionState
-    let group: ZoneGroup
-    let onSelectZone: (String) -> Void
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 6) {
-                ForEach(group.zones) { zone in
-                    let count = session.zoneCounts[zone.id]
-                    let hasStat = (count?.attempted ?? 0) > 0
-                    Button(action: { onSelectZone(zone.id) }) {
-                        HStack {
-                            Text(zone.shortLabel)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 36, alignment: .leading)
-                            Text(zone.label)
-                                .font(.system(size: 11))
-                                .foregroundColor(.white.opacity(0.6))
-                            Spacer()
-                            if hasStat, let c = count {
-                                Text("\(c.made)/\(c.attempted)")
-                                    .font(.system(size: 11, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.8))
-                                Text("\(c.percentage)%")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(pctColor(c.percentage))
-                            } else {
-                                Text("---")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.gray.opacity(0.5))
-                            }
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(
-                            zone.id == session.selectedZoneId
-                                ? group.color.opacity(0.5)
-                                : group.color.opacity(0.15)
-                        )
-                        .cornerRadius(8)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                // グループ集計
-                let stats = session.groupStats(for: group.id)
-                if stats.attempted > 0 {
-                    let pct = Int(Double(stats.made) / Double(stats.attempted) * 100)
-                    HStack {
-                        Text("Group")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.gray)
-                        Spacer()
-                        Text("\(stats.made)/\(stats.attempted)  \(pct)%")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.top, 4)
-                }
-            }
-            .padding(.horizontal, 4)
-        }
-        .navigationTitle(group.label)
-    }
-
-    private func pctColor(_ pct: Int) -> Color {
-        if pct >= 55 { return .green }
-        if pct >= 40 { return .yellow }
-        if pct >= 25 { return .orange }
-        return .red
-    }
-}
+// ━━ サブゾーン選択（2段階目）— ミニコートマップ ━━
+// MiniCourtView は MiniCourtView.swift で定義
 
 // ━━ 2段階ゾーン選択ビュー ━━
 
@@ -191,7 +116,7 @@ struct ZoneMapView: View {
 
     var body: some View {
         if let group = selectedGroup {
-            ZoneSubListView(group: group) { zoneId in
+            MiniCourtView(group: group) { zoneId in
                 onSelect(zoneId)
                 selectedGroup = nil
             }

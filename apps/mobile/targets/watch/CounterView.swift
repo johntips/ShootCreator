@@ -29,7 +29,7 @@ struct CounterView: View {
                     .foregroundColor(.gray)
             }
 
-            // MADE / MISS ボタン
+            // MADE / MISS ボタン — セッション active 時のみ有効
             HStack(spacing: 6) {
                 Button(action: {
                     session.recordShot(made: false)
@@ -42,10 +42,11 @@ struct CounterView: View {
                         .font(.system(size: 13, weight: .bold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .background(Color.red.opacity(0.8))
+                        .background(Color.red.opacity(session.isSessionActive ? 0.8 : 0.3))
                         .cornerRadius(10)
                 }
                 .buttonStyle(.plain)
+                .disabled(!session.isSessionActive)
 
                 Button(action: {
                     session.recordShot(made: true)
@@ -58,10 +59,11 @@ struct CounterView: View {
                         .font(.system(size: 13, weight: .bold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .background(Color.green.opacity(0.8))
+                        .background(Color.green.opacity(session.isSessionActive ? 0.8 : 0.3))
                         .cornerRadius(10)
                 }
                 .buttonStyle(.plain)
+                .disabled(!session.isSessionActive)
             }
 
             // Total

@@ -1,12 +1,14 @@
 import { CourtMap } from "@/components/CourtMap";
 import { getSessionRepository } from "@/infra/sessionRepository";
+import { getTagRepository } from "@/infra/tagRepository";
 import {
 	basketball,
 	getSport,
 	getTotalStats,
 	getZoneStats,
 } from "@shoot-creater/core";
-import type { Session } from "@shoot-creater/core";
+import type { Session, Tag } from "@shoot-creater/core";
+import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -25,11 +27,15 @@ export default function SummaryScreen() {
 	const { id } = useLocalSearchParams<{ id: string }>();
 	const router = useRouter();
 	const [session, setSession] = useState<Session | null>(null);
+	const [allTags, setAllTags] = useState<Tag[]>([]);
 
 	useEffect(() => {
 		getSessionRepository()
 			.getById(id ?? "")
 			.then(setSession);
+		getTagRepository()
+			.getAll()
+			.then(setAllTags);
 	}, [id]);
 
 	if (!session) {
@@ -63,12 +69,32 @@ export default function SummaryScreen() {
 		})
 		.sort((a, b) => b.attempted - a.attempted);
 
+	const sessionTags = session.tagIds
+		.map((tid) => allTags.find((t) => t.id === tid))
+		.filter((t): t is Tag => t != null);
+
 	return (
 		<>
-			<Stack.Screen options={{ title: "Summary" }} />
-			<ScrollView style={styles.container} contentContainerStyle={styles.content}>
+			<Stack.Screen options={{ title: "Summary", headerShown: false }} />
+			<View style={styles.container}>
+			<LinearGradient
+				colors={["#1a1a3e", "#0a0a1a", "#0d1117"]}
+				style={StyleSheet.absoluteFill}
+			/>
+			<ScrollView contentContainerStyle={styles.content}>
 				<Text style={styles.title}>Session Complete</Text>
 				<Text style={styles.dateText}>{dateStr}</Text>
+
+				{/* Tags */}
+				{sessionTags.length > 0 && (
+					<View style={styles.tagRow}>
+						{sessionTags.map((tag) => (
+							<View key={tag.id} style={styles.tagChip}>
+								<Text style={styles.tagChipText}>#{tag.name}</Text>
+							</View>
+						))}
+					</View>
+				)}
 
 				{/* Overall FG */}
 				<View style={styles.fgCard}>
@@ -78,6 +104,14 @@ export default function SummaryScreen() {
 					<Text style={styles.fgPct}>{fgPct}%</Text>
 					<Text style={styles.fgLabel}>Field Goal</Text>
 				</View>
+
+				{/* Memo */}
+				{session.memo.length > 0 && (
+					<View style={styles.memoCard}>
+						<Text style={styles.memoLabel}>Memo</Text>
+						<Text style={styles.memoText}>{session.memo}</Text>
+					</View>
+				)}
 
 				{/* Court Heatmap */}
 				<View style={styles.courtSection}>
@@ -123,6 +157,7 @@ export default function SummaryScreen() {
 					</Pressable>
 				</View>
 			</ScrollView>
+			</View>
 		</>
 	);
 }
@@ -135,6 +170,7 @@ const styles = StyleSheet.create({
 	content: {
 		padding: 20,
 		paddingBottom: 40,
+		paddingTop: 60,
 	},
 	loading: {
 		color: "#888",
@@ -153,11 +189,31 @@ const styles = StyleSheet.create({
 		fontSize: 14,
 		textAlign: "center",
 		marginTop: 4,
-		marginBottom: 20,
+		marginBottom: 12,
+	},
+	tagRow: {
+		flexDirection: "row",
+		flexWrap: "wrap",
+		justifyContent: "center",
+		gap: 6,
+		marginBottom: 16,
+	},
+	tagChip: {
+		backgroundColor: "rgba(139,92,246,0.2)",
+		borderRadius: 8,
+		paddingHorizontal: 10,
+		paddingVertical: 4,
+	},
+	tagChipText: {
+		color: "#8B5CF6",
+		fontSize: 12,
+		fontWeight: "600",
 	},
 	fgCard: {
-		backgroundColor: "#1a1a2e",
+		backgroundColor: "rgba(255,255,255,0.06)",
 		borderRadius: 16,
+		borderWidth: 1,
+		borderColor: "rgba(255,255,255,0.08)",
 		padding: 24,
 		alignItems: "center",
 		marginBottom: 20,
@@ -180,6 +236,27 @@ const styles = StyleSheet.create({
 		fontWeight: "500",
 		marginTop: 4,
 	},
+	memoCard: {
+		backgroundColor: "rgba(255,255,255,0.06)",
+		borderRadius: 12,
+		borderWidth: 1,
+		borderColor: "rgba(255,255,255,0.08)",
+		padding: 14,
+		marginBottom: 20,
+	},
+	memoLabel: {
+		color: "#888",
+		fontSize: 11,
+		fontWeight: "600",
+		textTransform: "uppercase",
+		letterSpacing: 0.5,
+		marginBottom: 6,
+	},
+	memoText: {
+		color: "#ccc",
+		fontSize: 14,
+		lineHeight: 20,
+	},
 	courtSection: {
 		marginBottom: 20,
 	},
@@ -197,7 +274,7 @@ const styles = StyleSheet.create({
 		alignItems: "center",
 		paddingVertical: 8,
 		borderBottomWidth: StyleSheet.hairlineWidth,
-		borderBottomColor: "#222",
+		borderBottomColor: "rgba(255,255,255,0.06)",
 	},
 	breakdownLabel: {
 		flex: 1,
@@ -231,12 +308,14 @@ const styles = StyleSheet.create({
 		alignItems: "center",
 	},
 	newBtn: {
-		backgroundColor: "#27ae60",
+		backgroundColor: "rgba(34,197,94,0.25)",
+		borderWidth: 1,
+		borderColor: "rgba(34,197,94,0.3)",
 	},
 	homeBtn: {
-		backgroundColor: "#1a1a2e",
+		backgroundColor: "rgba(255,255,255,0.06)",
 		borderWidth: 1,
-		borderColor: "#333",
+		borderColor: "rgba(255,255,255,0.08)",
 	},
 	actionBtnText: {
 		color: "#fff",
