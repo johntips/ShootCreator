@@ -7,7 +7,7 @@
     "format": "biome format --write .",
     "typecheck": "pnpm -F @shoot-creater/core typecheck && pnpm -F mobile typecheck",
     "test": "pnpm -F @shoot-creater/core test && pnpm -F mobile test",
-    "test:swift": "cd apps/mobile/targets/watch && swiftc -parse-as-library Tests/SessionStateTests.swift -o /tmp/session-state-test && /tmp/session-state-test",
+    "test:swift": "swiftc -parse-as-library apps/mobile/tests/watch/SessionStateTests.swift -o /tmp/session-state-test && /tmp/session-state-test",
     "precommit": "pnpm check && pnpm typecheck && pnpm test && pnpm test:swift"
   },
   "devDependencies": {

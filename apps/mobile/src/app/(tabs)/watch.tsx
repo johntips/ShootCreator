@@ -16,14 +16,17 @@ const POLL_INTERVAL = 5000;
 const MAX_LOG_ENTRIES = 50;
 
 interface LogEntry {
-  id: number;
+  id: string;
   time: string;
   channel: string;
   direction: "recv" | "event";
   detail: string;
 }
 
-let logId = 0;
+let logSeq = 0;
+function nextLogId(): string {
+  return `${Date.now()}-${++logSeq}`;
+}
 
 function timeStr(): string {
   const d = new Date();
@@ -42,9 +45,10 @@ export default function WatchScreen() {
   const logScrollRef = useRef<ScrollView>(null);
 
   const addLog = useCallback((channel: string, direction: "recv" | "event", detail: string) => {
+    const id = nextLogId();
+    const time = timeStr();
     setLogs((prev) => {
-      const entry: LogEntry = { id: ++logId, time: timeStr(), channel, direction, detail };
-      const next = [...prev, entry];
+      const next = [...prev, { id, time, channel, direction, detail }];
       return next.length > MAX_LOG_ENTRIES ? next.slice(-MAX_LOG_ENTRIES) : next;
     });
     setTimeout(() => logScrollRef.current?.scrollToEnd({ animated: true }), 100);

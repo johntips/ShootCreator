@@ -3,17 +3,16 @@ import Foundation
 // ═══════════════════════════════════════════════════════════════
 // SessionState ユニットテスト
 //
-// コンパイル & 実行:
-//   cd apps/mobile/targets/watch
-//   xcrun -sdk watchsimulator swiftc \
-//     -parse-as-library \
-//     -import-objc-header /dev/null \
-//     Tests/SessionStateTests.swift \
+// 実行: pnpm test:swift
+//   swiftc -parse-as-library apps/mobile/tests/watch/SessionStateTests.swift \
 //     -o /tmp/session-state-test && /tmp/session-state-test
 //
 // ※ SessionState 本体の Combine/NotificationCenter 依存を避けるため、
 //    テスト対象のロジックをこのファイル内に複製してテストする。
 //    本体との乖離は TypeScript テストで補完。
+//
+// ※ このファイルは targets/watch/ の外に配置し、Watch ビルドに
+//    含まれないようにする（@main 重複回避）。
 // ═══════════════════════════════════════════════════════════════
 
 // ── テスト対象のロジック複製 ───────────────────────────────
