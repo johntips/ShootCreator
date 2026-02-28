@@ -208,6 +208,8 @@ class WatchConnectivityManager: NSObject, ObservableObject, WCSessionDelegate {
         }
 
         // スタッツ同期（フルスナップショット）
+        // applicationContext 経由 ({zoneStats: [...]}) と
+        // sendMessage 経由 ({type: "stats-sync", zoneStats: [...]}) の両方に対応
         if data["zoneStats"] != nil {
             syncLog("[WSync:Recv] [\(channel)] stats snapshot received")
             NotificationCenter.default.post(

@@ -79,27 +79,31 @@
 **突破方針**:
 ```
 ┌──────────────────────────────────────────────────┐
-│  方式: System Sound で再生（AudioSession に干渉しない）  │
+│  方式: expo-av + expo-haptics 併用                  │
 │                                                    │
-│  Made → AudioServicesPlaySystemSound(1057)         │
-│         (Tink: 短い "ピン" 音)                       │
+│  Made → 高音ビープ(880Hz, 0.12s) + Haptics success │
+│         "ピン" — カウント確認音                       │
 │                                                    │
-│  Miss → 無音（何もしない）                            │
+│  Miss → 低音ビープ2連(280Hz, 0.08s×2) + Haptics err│
+│         "ぶぶっ" — ミス確認ビープ                     │
 │                                                    │
-│  理由: SystemSound は AVAudioSession の外で再生      │
-│        → 音声認識を中断しない                         │
-│        → Bluetooth HFP モードにも影響しない           │
+│  音声認識との共存:                                    │
+│    expo-speech-recognition が iosCategory:           │
+│    "playAndRecord" を設定済み                         │
+│    → AVAudioSession が playAndRecord モードなので     │
+│      短い効果音の再生と録音が同時に可能               │
+│    → 0.1s 程度の短音なら認識精度に影響なし            │
 │                                                    │
-│  代替案: expo-haptics で触覚フィードバック             │
-│         Made → Haptics.notificationAsync(success)   │
-│         Miss → Haptics.notificationAsync(error)     │
-│         → 音声一切不要で最も安全                      │
+│  実装: apps/mobile/src/utils/shotFeedback.ts        │
+│    - WAV ファイルをアセットとして埋め込み              │
+│    - アプリ起動時にプリロード（再生遅延ゼロ）          │
+│    - expo-haptics で触覚フィードバックも同時に発火     │
 └──────────────────────────────────────────────────┘
 ```
 
 **推奨**: 音声フィードバック + 触覚フィードバックの併用
-- メイド → システムサウンド "ピン" + Haptics success
-- ミス → 無音 + Haptics light（軽い振動のみ）
+- メイド → 高音ビープ "ピン" + Haptics success
+- ミス → 低音ビープ2連 "ぶぶっ" + Haptics error
 
 ### 難所 3: セッションの24h自動カットと永続化
 
@@ -293,22 +297,39 @@ ExpoSpeechRecognitionModule.start({
 ```
 
 ```typescript
-// フィードバック音 (SystemSound - 音声認識を中断しない)
-import { Platform } from "react-native";
+// apps/mobile/src/utils/shotFeedback.ts
+import { Audio } from "expo-av";
 import * as Haptics from "expo-haptics";
 
-function playMadeFeedback() {
-  // SystemSound は AVAudioSession の外で再生 → 音声認識と競合しない
-  if (Platform.OS === "ios") {
-    // AudioServicesPlaySystemSound は Expo Module で呼ぶか
-    // expo-haptics の notification で代替
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+// WAV アセット（apps/mobile/assets/sounds/ にプリビルド済み）
+const madeSound = require("@/assets/sounds/made.wav");
+const missSound = require("@/assets/sounds/miss.wav");
+
+let madePlayer: Audio.Sound | null = null;
+let missPlayer: Audio.Sound | null = null;
+
+/** アプリ起動時にプリロード（再生遅延ゼロ） */
+export async function preloadSounds() {
+  const { sound: m } = await Audio.Sound.createAsync(madeSound);
+  const { sound: x } = await Audio.Sound.createAsync(missSound);
+  madePlayer = m;
+  missPlayer = x;
+}
+
+/** MADE フィードバック: 高音ビープ "ピン" + 触覚 success */
+export async function playMadeFeedback() {
+  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  if (madePlayer) {
+    await madePlayer.replayAsync();
   }
 }
 
-function playMissFeedback() {
-  // 無音 + 軽い触覚のみ
-  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+/** MISS フィードバック: 低音ビープ2連 "ぶぶっ" + 触覚 error */
+export async function playMissFeedback() {
+  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+  if (missPlayer) {
+    await missPlayer.replayAsync();
+  }
 }
 ```
 
@@ -789,8 +810,8 @@ NBAショットチャートの標準ゾーン分割に準拠。RA・ペイント
   コートマップ上で直接ゾーンタップも可
   ディープレンジは破線の上に表示
   Voice ON 中は "in"/"out" でカウント
-  Made → "ピン" 音 + Haptics success
-  Miss → 無音 + Haptics light
+  Made → 高音ビープ "ピン" + Haptics success
+  Miss → 低音ビープ2連 "ぶぶっ" + Haptics error
 ```
 
 ### 6-4. iPhone: SessionSummary（セッション結果）

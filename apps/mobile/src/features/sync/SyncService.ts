@@ -85,26 +85,29 @@ export class SyncService {
     this.currentSession = session;
   }
 
-  /** ローカルショットを Watch に送信（best-effort） */
-  async sendShot(zoneId: string, made: boolean): Promise<void> {
+  /** ローカルショットを Watch に送信 + スタッツ即時同期（best-effort） */
+  async sendShot(zoneId: string, made: boolean, updatedSession: Session): Promise<void> {
+    const shotId = createShotId();
+    this.seenShotIds.add(shotId);
+    log("Send", `shot → ${shotId} zone=${zoneId} made=${made}`);
+
+    const msg: SyncMessage = {
+      type: "shot",
+      shotId,
+      zoneId,
+      made,
+      timestamp: Date.now(),
+      source: "iphone",
+    };
+
+    // ショットメッセージ + スタッツを同時送信（race condition 防止）
     try {
-      const shotId = createShotId();
-      this.seenShotIds.add(shotId);
-      log("Send", `shot → ${shotId} zone=${zoneId} made=${made}`);
-
-      const msg: SyncMessage = {
-        type: "shot",
-        shotId,
-        zoneId,
-        made,
-        timestamp: Date.now(),
-        source: "iphone",
-      };
-
       await bridge.sendRealtime(msg);
     } catch (e) {
-      log("Send", "shot FAIL", e);
+      log("Send", "shot realtime FAIL", e);
     }
+    // 更新後のセッションで即座にスタッツ同期
+    await this.syncStats(updatedSession);
   }
 
   /** ゾーン変更を Watch に送信（best-effort） */
@@ -122,20 +125,32 @@ export class SyncService {
     }
   }
 
-  /** 最新スタッツスナップショットを Watch に送信（best-effort） */
+  /**
+   * 最新スタッツスナップショットを Watch に送信（best-effort）
+   * sendMessage（リアルタイム）+ applicationContext（確実配信）の両チャネル
+   */
   async syncStats(session: Session): Promise<void> {
+    const zones = deriveStatsSyncPayload(session);
+    const payload = {
+      zoneStats: zones.map((z) => ({
+        zoneId: z.zoneId,
+        made: z.made,
+        attempted: z.attempted,
+      })),
+    };
+    log("Send", `stats → ${zones.length} zones`);
+
+    // sendMessage で即時配信（reachable 時のみ）
     try {
-      const zones = deriveStatsSyncPayload(session);
-      log("Send", `stats → ${zones.length} zones`);
-      await bridge.sendContext({
-        zoneStats: zones.map((z) => ({
-          zoneId: z.zoneId,
-          made: z.made,
-          attempted: z.attempted,
-        })),
-      });
+      await bridge.sendRealtime({ type: "stats-sync", ...payload } as unknown as SyncMessage);
     } catch (e) {
-      log("Send", "stats FAIL", e);
+      log("Send", "stats realtime FAIL", e);
+    }
+    // applicationContext で確実配信（バックアップ）
+    try {
+      await bridge.sendContext(payload);
+    } catch (e) {
+      log("Send", "stats context FAIL", e);
     }
   }
 

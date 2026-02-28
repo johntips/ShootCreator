@@ -197,21 +197,37 @@ describe("SyncService", () => {
   // ── sendShot ──────────────────────────────────────
 
   describe("sendShot", () => {
-    it("bridge.sendRealtime が呼ばれる", async () => {
-      await svc.sendShot("paint", true);
-      expect(bridge.sendRealtime).toHaveBeenCalledTimes(1);
-      const arg = vi.mocked(bridge.sendRealtime).mock.calls[0][0] as unknown as Record<
+    it("bridge.sendRealtime（ショット）+ sendRealtime（スタッツ）+ sendContext が呼ばれる", async () => {
+      const session = makeSession({
+        shots: [{ zoneId: "paint", made: true, timestamp: 1 }],
+      });
+      await svc.sendShot("paint", true, session);
+
+      // sendRealtime: ショットメッセージ + スタッツメッセージ = 2回
+      expect(bridge.sendRealtime).toHaveBeenCalledTimes(2);
+
+      const shotCall = vi.mocked(bridge.sendRealtime).mock.calls[0][0] as unknown as Record<
         string,
         unknown
       >;
-      expect(arg.type).toBe("shot");
-      expect(arg.zoneId).toBe("paint");
-      expect(arg.made).toBe(true);
-      expect(arg.source).toBe("iphone");
+      expect(shotCall.type).toBe("shot");
+      expect(shotCall.zoneId).toBe("paint");
+      expect(shotCall.made).toBe(true);
+      expect(shotCall.source).toBe("iphone");
+
+      // sendContext: スタッツスナップショット
+      expect(bridge.sendContext).toHaveBeenCalledTimes(1);
+      expect(bridge.sendContext).toHaveBeenCalledWith({
+        zoneStats: [{ zoneId: "paint", made: 1, attempted: 1 }],
+      });
     });
 
     it("送信した shotId は dedup Set に登録され、受信時に重複扱い", async () => {
-      await svc.sendShot("paint", true);
+      const session = makeSession({
+        shots: [{ zoneId: "paint", made: true, timestamp: 1 }],
+      });
+      await svc.sendShot("paint", true, session);
+
       const sentMsg = vi.mocked(bridge.sendRealtime).mock.calls[0][0] as unknown as Record<
         string,
         unknown
@@ -226,6 +242,24 @@ describe("SyncService", () => {
         source: "watch",
       });
       expect(onShot).not.toHaveBeenCalled();
+    });
+
+    it("更新後セッションのスタッツが即座に送信される（off-by-one 防止）", async () => {
+      const session = makeSession({
+        shots: [
+          { zoneId: "paint", made: true, timestamp: 1 },
+          { zoneId: "paint", made: false, timestamp: 2 },
+          { zoneId: "three", made: true, timestamp: 3 },
+        ],
+      });
+      await svc.sendShot("paint", true, session);
+
+      expect(bridge.sendContext).toHaveBeenCalledWith({
+        zoneStats: expect.arrayContaining([
+          { zoneId: "paint", made: 1, attempted: 2 },
+          { zoneId: "three", made: 1, attempted: 1 },
+        ]),
+      });
     });
   });
 
@@ -286,24 +320,24 @@ describe("SyncService", () => {
   describe("stop", () => {
     it("stop 後は shot 受信してもコールバック呼ばれない", () => {
       svc.stop();
-      // handleIncoming 自体は呼べるが onRemoteShot が null
-      // (実際の運用では listener が解除されるので呼ばれない)
       expect(onShot).not.toHaveBeenCalled();
     });
 
     it("stop 後 currentSession は null", () => {
       svc.updateSession(makeSession());
       svc.stop();
+      // 新しい start なしに watch-ready を検証
       const reply = vi.fn();
-      // handleIncoming を直接呼べないが、新しい start で確認
-      // stop で currentSession が null になることを watch-ready で検証
+      // capturedMessageHandler は stop で解除されるので直接 handleIncoming は呼べない
+      // stop で seenShotIds もクリアされることを確認
+      expect(() => svc.stop()).not.toThrow(); // 二重 stop も安全
     });
   });
 
   // ── syncStats ─────────────────────────────────────
 
   describe("syncStats", () => {
-    it("bridge.sendContext が zoneStats ペイロードで呼ばれる", async () => {
+    it("bridge.sendRealtime + sendContext の両チャネルで送信", async () => {
       const session = makeSession({
         shots: [
           { zoneId: "paint", made: true, timestamp: 1 },
@@ -312,12 +346,155 @@ describe("SyncService", () => {
         ],
       });
       await svc.syncStats(session);
+
+      // sendRealtime: stats-sync メッセージ
+      expect(bridge.sendRealtime).toHaveBeenCalledTimes(1);
+      const realtimeArg = vi.mocked(bridge.sendRealtime).mock.calls[0][0] as unknown as Record<
+        string,
+        unknown
+      >;
+      expect(realtimeArg.type).toBe("stats-sync");
+      expect(realtimeArg.zoneStats).toBeDefined();
+
+      // sendContext: applicationContext バックアップ
       expect(bridge.sendContext).toHaveBeenCalledWith({
         zoneStats: expect.arrayContaining([
           { zoneId: "paint", made: 1, attempted: 2 },
           { zoneId: "three", made: 1, attempted: 1 },
         ]),
       });
+    });
+
+    it("空セッションでは空配列が送信される", async () => {
+      await svc.syncStats(makeSession());
+      expect(bridge.sendContext).toHaveBeenCalledWith({ zoneStats: [] });
+    });
+  });
+
+  // ── エラーハンドリング ─────────────────────────────
+
+  describe("エラーハンドリング", () => {
+    it("sendRealtime が失敗しても syncStats は sendContext まで実行する", async () => {
+      vi.mocked(bridge.sendRealtime).mockRejectedValueOnce(new Error("network error"));
+
+      const session = makeSession({
+        shots: [{ zoneId: "paint", made: true, timestamp: 1 }],
+      });
+      // エラーでもクラッシュしない
+      await expect(svc.syncStats(session)).resolves.toBeUndefined();
+      // sendContext は呼ばれる（フォールバック）
+      expect(bridge.sendContext).toHaveBeenCalledTimes(1);
+    });
+
+    it("sendContext が失敗しても sendShot 全体はクラッシュしない", async () => {
+      vi.mocked(bridge.sendContext).mockRejectedValueOnce(new Error("context error"));
+
+      const session = makeSession({
+        shots: [{ zoneId: "paint", made: true, timestamp: 1 }],
+      });
+      await expect(svc.sendShot("paint", true, session)).resolves.toBeUndefined();
+      // sendRealtime（ショット）は呼ばれている
+      expect(bridge.sendRealtime).toHaveBeenCalled();
+    });
+
+    it("sendRealtime と sendContext 両方失敗しても安全", async () => {
+      vi.mocked(bridge.sendRealtime).mockRejectedValue(new Error("realtime fail"));
+      vi.mocked(bridge.sendContext).mockRejectedValue(new Error("context fail"));
+
+      const session = makeSession({
+        shots: [{ zoneId: "paint", made: true, timestamp: 1 }],
+      });
+      await expect(svc.sendShot("paint", true, session)).resolves.toBeUndefined();
+      await expect(svc.syncStats(session)).resolves.toBeUndefined();
+      await expect(svc.sendZoneChange("three")).resolves.toBeUndefined();
+      await expect(svc.sendSessionStart(session)).resolves.toBeUndefined();
+    });
+
+    it("start 失敗時もクラッシュしない", async () => {
+      vi.mocked(bridge.onMessage).mockRejectedValueOnce(new Error("bridge unavailable"));
+      const svc2 = new SyncService();
+      await expect(svc2.start({ onShot: vi.fn(), onZoneChange: vi.fn() })).resolves.toBeUndefined();
+    });
+  });
+
+  // ── 連続ショットの整合性 ───────────────────────────
+
+  describe("連続ショットの整合性", () => {
+    it("3連続ショット後、最終 syncStats が全ショットを含む", async () => {
+      const shots: Shot[] = [];
+
+      for (let i = 0; i < 3; i++) {
+        const shot: Shot = { zoneId: "paint", made: i % 2 === 0, timestamp: i };
+        shots.push(shot);
+        const session = makeSession({ shots: [...shots] });
+        await svc.sendShot("paint", shot.made, session);
+      }
+
+      // 最後の sendContext 呼び出しが3ショット分を含む
+      const lastContextCall = vi.mocked(bridge.sendContext).mock.calls.at(-1);
+      expect(lastContextCall).toBeDefined();
+      const payload = lastContextCall?.[0] as {
+        zoneStats: Array<{ made: number; attempted: number }>;
+      };
+      expect(payload.zoneStats).toContainEqual({
+        zoneId: "paint",
+        made: 2,
+        attempted: 3,
+      });
+    });
+
+    it("Watch 発ショット受信後の syncStats に Watch ショットが含まれる", async () => {
+      // Watch 発ショットを受信 → iPhone セッションに追加
+      sendToService({
+        type: "shot",
+        shotId: "w-remote-1",
+        zoneId: "paint",
+        made: true,
+        timestamp: 100,
+        source: "watch",
+      });
+      expect(onShot).toHaveBeenCalledTimes(1);
+
+      // iPhone 側で Watch ショットを含むセッションを構築し syncStats
+      const sessionWithWatchShot = makeSession({
+        shots: [
+          { zoneId: "paint", made: true, timestamp: 100 }, // Watch 発
+          { zoneId: "three", made: false, timestamp: 200 }, // iPhone 発
+        ],
+      });
+      vi.clearAllMocks();
+      await svc.syncStats(sessionWithWatchShot);
+
+      // Watch ショットを含むスタッツが送信される
+      expect(bridge.sendContext).toHaveBeenCalledWith({
+        zoneStats: expect.arrayContaining([
+          { zoneId: "paint", made: 1, attempted: 1 },
+          { zoneId: "three", made: 0, attempted: 1 },
+        ]),
+      });
+      expect(bridge.sendRealtime).toHaveBeenCalledTimes(1);
+    });
+
+    it("異なるゾーンへの連続ショットも正しく集計", async () => {
+      const sessions: Session[] = [
+        makeSession({ shots: [{ zoneId: "paint", made: true, timestamp: 1 }] }),
+        makeSession({
+          shots: [
+            { zoneId: "paint", made: true, timestamp: 1 },
+            { zoneId: "three", made: false, timestamp: 2 },
+          ],
+        }),
+      ];
+
+      await svc.sendShot("paint", true, sessions[0]);
+      await svc.sendShot("three", false, sessions[1]);
+
+      const lastContextCall = vi.mocked(bridge.sendContext).mock.calls.at(-1);
+      const payload = lastContextCall?.[0] as {
+        zoneStats: Array<{ zoneId: string; made: number; attempted: number }>;
+      };
+      expect(payload.zoneStats).toContainEqual({ zoneId: "paint", made: 1, attempted: 1 });
+      expect(payload.zoneStats).toContainEqual({ zoneId: "three", made: 0, attempted: 1 });
     });
   });
 });

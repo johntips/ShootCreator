@@ -8,9 +8,17 @@
     "typecheck": "pnpm -F @shoot-creater/core typecheck && pnpm -F mobile typecheck",
     "test": "pnpm -F @shoot-creater/core test && pnpm -F mobile test",
     "test:swift": "swiftc -parse-as-library apps/mobile/tests/watch/SessionStateTests.swift -o /tmp/session-state-test && /tmp/session-state-test",
-    "precommit": "pnpm check && pnpm typecheck && pnpm test && pnpm test:swift"
+    "precommit": "pnpm check && pnpm typecheck && pnpm test && pnpm test:swift",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.0"
+  },
+  "version": "1.0.0",
+  "dependencies": {
+    "expo": "~54.0.33",
+    "react": "19.1.0",
+    "react-native": "0.81.5"
   }
 }

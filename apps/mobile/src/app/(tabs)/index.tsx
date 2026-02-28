@@ -13,7 +13,9 @@ export default function HomeScreen() {
       <LinearGradient colors={["#1a1a3e", "#0a0a1a", "#0d1117"]} style={StyleSheet.absoluteFill} />
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
         <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 90 }]}>
-          <Text style={styles.title}>ShootCreater</Text>
+          <Text testID="home-title" style={styles.title}>
+            ShootCreater
+          </Text>
           <Text style={styles.subtitle}>Select Sport</Text>
 
           <Pressable
@@ -28,6 +30,7 @@ export default function HomeScreen() {
             return (
               <Pressable
                 key={sport.id}
+                testID={`sport-card-${sport.id}`}
                 style={({ pressed }) => [
                   styles.card,
                   !isReady && styles.cardDisabled,

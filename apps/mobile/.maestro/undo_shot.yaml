@@ -1,0 +1,30 @@
+appId: com.shootcreater.app
+name: Undo Shot
+---
+- launchApp
+- tapOn:
+    id: "sport-card-basketball"
+- assertVisible: "btn-made"
+
+# Record 2 shots
+- tapOn:
+    id: "btn-made"
+- tapOn:
+    id: "btn-miss"
+- assertVisible:
+    id: "total-stats"
+    text: "1/2.*"
+
+# Undo last shot
+- tapOn:
+    id: "btn-undo"
+- assertVisible:
+    id: "total-stats"
+    text: "1/1.*"
+
+# Undo again
+- tapOn:
+    id: "btn-undo"
+- assertVisible:
+    id: "total-stats"
+    text: "0/0"

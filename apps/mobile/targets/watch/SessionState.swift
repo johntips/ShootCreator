@@ -41,13 +41,15 @@ class SessionState: ObservableObject {
             .store(in: &cancellables)
 
         // iPhone → Watch のショット受信
+        // ※ カウント更新は mergeStatsFromiPhone() (stats snapshot) のみで行う。
+        //    recordRemoteShot() を併用するとショットメッセージとスタッツの
+        //    到着順によって二重カウントや off-by-one が発生するため。
+        //    通知自体は将来の UI フィードバック用に購読を残す。
         NotificationCenter.default.publisher(for: .shotReceivedFromiPhone)
-            .compactMap { $0.userInfo as? [String: Any] }
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] data in
-                guard let zoneId = data["zoneId"] as? String,
-                      let made = data["made"] as? Bool else { return }
-                self?.recordRemoteShot(zoneId: zoneId, made: made)
+            .sink { [weak self] _ in
+                // UI フィードバック用（カウント更新は stats snapshot で行う）
+                _ = self  // keep reference alive
             }
             .store(in: &cancellables)
 

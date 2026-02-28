@@ -41,15 +41,9 @@ export function useWatchSync({ session, onRemoteShot, onRemoteZoneChange }: UseW
     serviceRef.current.updateSession(session);
   }, [session]);
 
-  // ショット数が変わるたびにスタッツを Watch に同期
-  // biome-ignore lint/correctness/useExhaustiveDependencies: shots.length でのみ同期（意図的）
-  useEffect(() => {
-    void serviceRef.current.syncStats(session);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.shots.length]);
-
-  const sendShot = useCallback((zoneId: string, made: boolean) => {
-    void serviceRef.current.sendShot(zoneId, made);
+  // sendShot: 更新後セッションを受け取り、即座にスタッツ同期
+  const sendShot = useCallback((zoneId: string, made: boolean, updatedSession: Session) => {
+    void serviceRef.current.sendShot(zoneId, made, updatedSession);
   }, []);
 
   const sendZoneChange = useCallback((zoneId: string) => {
@@ -60,5 +54,9 @@ export function useWatchSync({ session, onRemoteShot, onRemoteZoneChange }: UseW
     void serviceRef.current.sendSessionEnd(endedSession);
   }, []);
 
-  return { sendShot, sendZoneChange, sendSessionEnd };
+  const syncStats = useCallback((updatedSession: Session) => {
+    void serviceRef.current.syncStats(updatedSession);
+  }, []);
+
+  return { sendShot, sendZoneChange, sendSessionEnd, syncStats };
 }

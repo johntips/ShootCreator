@@ -1,0 +1,9 @@
+appId: com.shootcreater.app
+name: Start Session
+---
+- launchApp
+- assertVisible: "home-title"
+- tapOn:
+    id: "sport-card-basketball"
+- assertVisible: "btn-made"
+- assertVisible: "btn-miss"

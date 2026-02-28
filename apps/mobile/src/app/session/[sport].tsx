@@ -4,6 +4,12 @@ import { useWatchSync } from "@/features/sync/useWatchSync";
 import { useVoiceCounter } from "@/features/voice/useVoiceCounter";
 import { useSessionStore, useTagStore } from "@/infra/storage";
 import {
+  playMadeFeedback,
+  playMissFeedback,
+  preloadShotSounds,
+  unloadShotSounds,
+} from "@/utils/shotFeedback";
+import {
   addShot,
   basketball,
   createSession,
@@ -16,7 +22,7 @@ import {
 import type { Session, Shot, Tag } from "@shoot-creater/core";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -61,6 +67,14 @@ export default function SessionScreen() {
   const [newTagName, setNewTagName] = useState("");
   const memoRef = useRef(session.memo);
 
+  // サウンドのプリロード/アンロード
+  useEffect(() => {
+    void preloadShotSounds();
+    return () => {
+      void unloadShotSounds();
+    };
+  }, []);
+
   const zoneStats = useMemo(() => getZoneStats(session), [session]);
   const totalStats = useMemo(() => getTotalStats(session), [session]);
 
@@ -70,13 +84,22 @@ export default function SessionScreen() {
   );
 
   // ─── Watch 双方向同期 ────────────────────────────────────
+  // syncStatsRef: handleRemoteShot → watchSync の循環参照を避けるための ref
+  // biome-ignore lint/style/noNonNullAssertion: watchSync 初期化後に即座に設定
+  const syncStatsRef = useRef<(s: Session) => void>(null!);
+
   const handleRemoteShot = useCallback(
     (shot: Shot) => {
+      let updatedSession: Session | undefined;
       setSession((prev) => {
         const next = addShot(prev, shot);
         save(next);
+        updatedSession = next;
         return next;
       });
+      if (updatedSession) {
+        syncStatsRef.current(updatedSession);
+      }
     },
     [save],
   );
@@ -90,6 +113,7 @@ export default function SessionScreen() {
     onRemoteShot: handleRemoteShot,
     onRemoteZoneChange: handleRemoteZoneChange,
   });
+  syncStatsRef.current = watchSync.syncStats;
 
   /** ユーザー操作でゾーン変更 → Watch にも同期 */
   const handleZoneChange = useCallback(
@@ -104,12 +128,22 @@ export default function SessionScreen() {
   const handleShot = useCallback(
     (made: boolean) => {
       const shot: Shot = { zoneId: selectedZoneId, made, timestamp: Date.now() };
+      let updatedSession: Session | undefined;
       setSession((prev) => {
         const next = addShot(prev, shot);
         save(next);
+        updatedSession = next;
         return next;
       });
-      watchSync.sendShot(selectedZoneId, made);
+      // updatedSession は setSession のアップデータ内で同期的に設定済み
+      if (updatedSession) {
+        watchSync.sendShot(selectedZoneId, made, updatedSession);
+      }
+      if (made) {
+        playMadeFeedback();
+      } else {
+        playMissFeedback();
+      }
     },
     [selectedZoneId, save, watchSync],
   );
@@ -217,7 +251,12 @@ export default function SessionScreen() {
             </Pressable>
             <Text style={styles.headerTitle}>{sportConfig.name}</Text>
             {session.shots.length > 0 ? (
-              <Pressable onPress={handleEnd} style={styles.endBtn} hitSlop={8}>
+              <Pressable
+                testID="btn-end-session"
+                onPress={handleEnd}
+                style={styles.endBtn}
+                hitSlop={8}
+              >
                 <Text style={styles.endBtnText}>END</Text>
               </Pressable>
             ) : (
@@ -250,6 +289,7 @@ export default function SessionScreen() {
             </View>
             <Text style={styles.zoneName}>{selectedZone?.label ?? "Select Zone"}</Text>
             <Pressable
+              testID="btn-mic"
               style={[styles.voiceBtn, voice.isListening && styles.voiceBtnActive]}
               onPress={voice.toggle}
             >
@@ -260,25 +300,29 @@ export default function SessionScreen() {
           {/* ── FG Counter ── */}
           <View style={styles.counterSection}>
             <View style={styles.fgMain}>
-              <Text style={styles.fgCount}>
+              <Text testID="zone-made-count" style={styles.fgCount}>
                 {zoneMade}
                 <Text style={styles.fgSlash}> / </Text>
-                {zoneAttempted}
+                <Text testID="zone-attempted-count">{zoneAttempted}</Text>
               </Text>
               {zonePct !== null ? (
-                <Text style={[styles.fgPct, { color: groupColor }]}>{zonePct}%</Text>
+                <Text testID="zone-pct" style={[styles.fgPct, { color: groupColor }]}>
+                  {zonePct}%
+                </Text>
               ) : (
-                <Text style={styles.fgPctEmpty}>---%</Text>
+                <Text testID="zone-pct" style={styles.fgPctEmpty}>
+                  ---%
+                </Text>
               )}
             </View>
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>Total</Text>
-              <Text style={styles.totalValue}>
+              <Text testID="total-stats" style={styles.totalValue}>
                 {totalStats.made}/{totalStats.attempted}
                 {totalPct !== null ? ` (${totalPct}%)` : ""}
               </Text>
               {session.shots.length > 0 && (
-                <Pressable onPress={handleUndo} style={styles.undoBtn}>
+                <Pressable testID="btn-undo" onPress={handleUndo} style={styles.undoBtn}>
                   <Text style={styles.undoBtnText}>UNDO</Text>
                 </Pressable>
               )}
@@ -288,6 +332,7 @@ export default function SessionScreen() {
           {/* ── MADE / MISS Buttons ── */}
           <View style={styles.buttonRow}>
             <Pressable
+              testID="btn-miss"
               style={({ pressed }) => [
                 styles.shotBtn,
                 styles.missBtn,
@@ -298,6 +343,7 @@ export default function SessionScreen() {
               <Text style={styles.shotBtnText}>MISS</Text>
             </Pressable>
             <Pressable
+              testID="btn-made"
               style={({ pressed }) => [
                 styles.shotBtn,
                 styles.madeBtn,

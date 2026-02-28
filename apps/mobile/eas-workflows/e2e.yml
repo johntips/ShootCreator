@@ -1,0 +1,26 @@
+name: E2E Tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  e2e-ios:
+    name: iOS E2E (Maestro Cloud)
+    runs-on:
+      os: macos
+      xcode: latest
+    steps:
+      - name: Build for simulator
+        uses: eas/build
+        with:
+          profile: e2e
+          platform: ios
+
+      - name: Run Maestro tests
+        uses: mobile-dev-inc/action-maestro-cloud@v1
+        with:
+          api-key: ${{ secrets.MAESTRO_CLOUD_API_KEY }}
+          app-file: ${{ steps.build.outputs.app-path }}
+          workspace: .maestro/

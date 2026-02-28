@@ -10,6 +10,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.shootcreater.app",
+      "appleTeamId": "832VSWQQLH",
       "infoPlist": {
         "NSSpeechRecognitionUsageDescription": "Voice commands to record shots",
         "NSMicrophoneUsageDescription": "Microphone for voice shot recording"

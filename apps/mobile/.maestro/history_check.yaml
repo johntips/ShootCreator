@@ -1,0 +1,20 @@
+appId: com.shootcreater.app
+name: History Check
+---
+- launchApp
+
+# Complete a session first
+- tapOn:
+    id: "sport-card-basketball"
+- tapOn:
+    id: "btn-made"
+- tapOn:
+    id: "btn-end-session"
+- tapOn: "End"
+- assertVisible: "summary-title"
+- tapOn:
+    id: "btn-home"
+
+# Navigate to History tab
+- tapOn: "History"
+- assertVisible: "history-title"

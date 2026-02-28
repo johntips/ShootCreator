@@ -41,9 +41,11 @@ export default function HistoryScreen() {
       <LinearGradient colors={["#1a1a3e", "#0a0a1a", "#0d1117"]} style={StyleSheet.absoluteFill} />
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
         <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 90 }]}>
-          <Text style={styles.title}>History</Text>
+          <Text testID="history-title" style={styles.title}>
+            History
+          </Text>
           {sessions.length === 0 ? (
-            <View style={styles.empty}>
+            <View testID="history-empty" style={styles.empty}>
               <Text style={styles.emptyText}>No sessions yet</Text>
               <Text style={styles.emptyHint}>Start a shooting session to see your history</Text>
             </View>

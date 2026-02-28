@@ -1,0 +1,29 @@
+appId: com.shootcreater.app
+name: End Session (Full Flow)
+---
+- launchApp
+- tapOn:
+    id: "sport-card-basketball"
+
+# Record shots
+- tapOn:
+    id: "btn-made"
+- tapOn:
+    id: "btn-miss"
+- tapOn:
+    id: "btn-made"
+
+# End session
+- tapOn:
+    id: "btn-end-session"
+- tapOn: "End"
+
+# Summary screen
+- assertVisible: "summary-title"
+- assertVisible: "summary-fg-count"
+- assertVisible: "summary-fg-pct"
+
+# Navigate home
+- tapOn:
+    id: "btn-home"
+- assertVisible: "home-title"

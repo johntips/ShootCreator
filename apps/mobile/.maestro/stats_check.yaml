@@ -1,0 +1,23 @@
+appId: com.shootcreater.app
+name: Stats Check
+---
+- launchApp
+
+# Complete a session first
+- tapOn:
+    id: "sport-card-basketball"
+- tapOn:
+    id: "btn-made"
+- tapOn:
+    id: "btn-miss"
+- tapOn:
+    id: "btn-end-session"
+- tapOn: "End"
+- assertVisible: "summary-title"
+- tapOn:
+    id: "btn-home"
+
+# Navigate to Stats tab
+- tapOn: "Stats"
+- assertVisible: "stats-title"
+- assertVisible: "stats-total-card"

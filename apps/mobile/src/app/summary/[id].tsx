@@ -73,7 +73,9 @@ export default function SummaryScreen() {
           style={StyleSheet.absoluteFill}
         />
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.title}>Session Complete</Text>
+          <Text testID="summary-title" style={styles.title}>
+            Session Complete
+          </Text>
           <Text style={styles.dateText}>{dateStr}</Text>
 
           {/* Tags */}
@@ -89,10 +91,12 @@ export default function SummaryScreen() {
 
           {/* Overall FG */}
           <View style={styles.fgCard}>
-            <Text style={styles.fgCount}>
+            <Text testID="summary-fg-count" style={styles.fgCount}>
               {totalStats.made} / {totalStats.attempted}
             </Text>
-            <Text style={styles.fgPct}>{fgPct}%</Text>
+            <Text testID="summary-fg-pct" style={styles.fgPct}>
+              {fgPct}%
+            </Text>
             <Text style={styles.fgLabel}>Field Goal</Text>
           </View>
 
@@ -135,12 +139,14 @@ export default function SummaryScreen() {
           {/* Action Buttons */}
           <View style={styles.actions}>
             <Pressable
+              testID="btn-new-session"
               style={[styles.actionBtn, styles.newBtn]}
               onPress={() => router.replace(`/session/${session.sportId}`)}
             >
               <Text style={styles.actionBtnText}>New Session</Text>
             </Pressable>
             <Pressable
+              testID="btn-home"
               style={[styles.actionBtn, styles.homeBtn]}
               onPress={() => router.replace("/")}
             >

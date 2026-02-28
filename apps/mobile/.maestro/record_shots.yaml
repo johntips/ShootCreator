@@ -1,0 +1,28 @@
+appId: com.shootcreater.app
+name: Record Shots
+---
+- launchApp
+- tapOn:
+    id: "sport-card-basketball"
+- assertVisible: "btn-made"
+
+# Record MADE shot
+- tapOn:
+    id: "btn-made"
+- assertVisible:
+    id: "total-stats"
+    text: "1/1.*"
+
+# Record MISS shot
+- tapOn:
+    id: "btn-miss"
+- assertVisible:
+    id: "total-stats"
+    text: "1/2.*"
+
+# Record another MADE
+- tapOn:
+    id: "btn-made"
+- assertVisible:
+    id: "total-stats"
+    text: "2/3.*"

@@ -81,7 +81,9 @@ export default function StatsScreen() {
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
         <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 90 }]}>
           {/* ── Header ── */}
-          <Text style={styles.title}>Stats</Text>
+          <Text testID="stats-title" style={styles.title}>
+            Stats
+          </Text>
 
           {/* ── Period Filter ── */}
           <View style={styles.filterRow}>
@@ -137,14 +139,14 @@ export default function StatsScreen() {
           )}
 
           {filtered.length === 0 ? (
-            <View style={styles.empty}>
+            <View testID="stats-empty" style={styles.empty}>
               <Text style={styles.emptyText}>No data yet</Text>
               <Text style={styles.emptyHint}>Complete a session to see stats</Text>
             </View>
           ) : (
             <>
               {/* ── Total FG Card ── */}
-              <View style={styles.glassCard}>
+              <View testID="stats-total-card" style={styles.glassCard}>
                 <Text style={styles.totalLabel}>Field Goal</Text>
                 <View style={styles.totalRow}>
                   <Text style={styles.totalCount}>
