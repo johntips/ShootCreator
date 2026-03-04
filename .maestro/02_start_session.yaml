@@ -29,21 +29,24 @@ appId: com.shootcreator.app.qa
 
 - takeScreenshot: session_with_shots
 
-# End session
+# End session - tap the header END button
 - tapOn:
     id: "btn-end-session"
 
-# Wait for Alert to appear
-- waitForAnimationToEnd
+# Wait for iOS Alert dialog to appear and verify it
+- assertVisible: "Save and end this shooting session?"
 
-# Tap "End Session" in the iOS Alert dialog
-- tapOn: "End Session"
+# Tap "End Session" button in Alert dialog
+# Use "below" selector to target the button BELOW the alert message, not the alert title
+- tapOn:
+    text: "End Session"
+    below: "Save and end this shooting session?"
+    retryTapIfNoChange: true
 
 # Wait for navigation to summary
-- waitForAnimationToEnd
-
-# Verify summary screen
-- assertVisible:
-    id: "summary-title"
+- extendedWaitUntil:
+    visible:
+      id: "summary-title"
+    timeout: 5000
 
 - takeScreenshot: session_complete
