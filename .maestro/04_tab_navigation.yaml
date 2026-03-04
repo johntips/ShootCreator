@@ -1,0 +1,34 @@
+appId: com.shootcreator.app.qa
+---
+# Test: Tab Navigation
+# Switch between all tabs and verify each screen loads
+
+- launchApp
+
+# Home tab (default)
+- assertVisible:
+    id: "home-title"
+- takeScreenshot: tab_home
+
+# History tab
+- tapOn: "History"
+- assertVisible:
+    id: "history-title"
+- takeScreenshot: tab_history
+
+# Stats tab
+- tapOn: "Stats"
+- assertVisible:
+    id: "stats-title"
+- takeScreenshot: tab_stats
+
+# Watch tab
+- tapOn: "Watch"
+- assertVisible: "Watch"
+- takeScreenshot: tab_watch
+
+# Back to Home
+- tapOn: "Home"
+- assertVisible:
+    id: "home-title"
+- takeScreenshot: tab_home_return

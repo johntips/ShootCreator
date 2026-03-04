@@ -1,0 +1,39 @@
+appId: com.shootcreator.app.qa
+---
+# Test: End Session & View Summary
+# Record shots, end session, verify summary screen
+
+- launchApp
+
+# Start basketball session
+- tapOn:
+    id: "sport-card-basketball"
+
+# Record some shots
+- tapOn:
+    id: "btn-made"
+- tapOn:
+    id: "btn-made"
+- tapOn:
+    id: "btn-miss"
+
+# End session
+- tapOn:
+    id: "btn-end-session"
+
+# Confirm alert dialog (iOS native alert with "Cancel" and "End")
+- tapOn: "End"
+
+- takeScreenshot: summary_screen
+
+# Verify summary elements
+- assertVisible:
+    id: "summary-title"
+
+- assertVisible:
+    id: "summary-fg-count"
+
+- assertVisible:
+    id: "summary-fg-pct"
+
+- takeScreenshot: summary_complete

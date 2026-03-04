@@ -21,6 +21,17 @@
         "APP_ENV": "qa"
       }
     },
+    "maestro": {
+      "extends": "base",
+      "distribution": "internal",
+      "ios": {
+        "simulator": true,
+        "buildConfiguration": "Release"
+      },
+      "env": {
+        "APP_ENV": "qa"
+      }
+    },
     "qa": {
       "extends": "base",
       "distribution": "internal",

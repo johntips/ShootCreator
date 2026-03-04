@@ -13,10 +13,11 @@ const config: ExpoConfig = {
   ios: {
     supportsTablet: false,
     bundleIdentifier: IS_QA ? "com.shootcreator.app.qa" : "com.shootcreator.app",
-    appleTeamId: "832VSWQQLH",
+    appleTeamId: "4UVNJ7B6BR",
     infoPlist: {
       NSSpeechRecognitionUsageDescription: "Voice commands to record shots",
       NSMicrophoneUsageDescription: "Microphone for voice shot recording",
+      NSPhotoLibraryUsageDescription: "Save and share your shooting session summaries",
     },
   },
   extra: {

@@ -1,0 +1,43 @@
+appId: com.shootcreator.app.qa
+---
+# Test: Start Basketball Session, Record Shots & End Session
+# Full session lifecycle: start → record → end → summary
+
+- launchApp
+
+# Tap basketball card to start session
+- tapOn:
+    id: "sport-card-basketball"
+
+- takeScreenshot: session_screen
+
+# Record a MADE shot
+- tapOn:
+    id: "btn-made"
+
+- takeScreenshot: after_made
+
+# Record a MISS shot
+- tapOn:
+    id: "btn-miss"
+
+- takeScreenshot: after_miss
+
+# Verify stats are visible
+- assertVisible:
+    id: "total-stats"
+
+- takeScreenshot: session_with_shots
+
+# End session to complete the flow
+- tapOn:
+    id: "btn-end-session"
+
+# Confirm alert dialog (button is "End", not "Save")
+- tapOn: "End"
+
+# Verify summary screen
+- assertVisible:
+    id: "summary-title"
+
+- takeScreenshot: session_complete

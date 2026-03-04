@@ -1,0 +1,14 @@
+appId: com.shootcreator.app.qa
+---
+# Test: App Launch & Home Screen
+# Verify the app launches and displays the home screen correctly
+
+- launchApp
+
+- assertVisible:
+    id: "home-title"
+
+- assertVisible:
+    id: "sport-card-basketball"
+
+- takeScreenshot: home_screen
