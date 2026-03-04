@@ -72,4 +72,9 @@ jobs:
 
       - name: Build iOS
         working-directory: apps/mobile
-        run: eas build --platform ios --profile ${{ steps.profile.outputs.profile }} --non-interactive
+        run: |
+          if [ "${{ steps.profile.outputs.profile }}" = "production" ]; then
+            eas build --platform ios --profile production --auto-submit --non-interactive
+          else
+            eas build --platform ios --profile ${{ steps.profile.outputs.profile }} --non-interactive
+          fi
