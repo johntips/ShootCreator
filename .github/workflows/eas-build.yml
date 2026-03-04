@@ -5,6 +5,16 @@ on:
     branches:
       - main
       - develop
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "EAS Build profile"
+        required: true
+        default: "qa"
+        type: choice
+        options:
+          - qa
+          - production
 
 concurrency:
   group: eas-build-${{ github.ref }}
@@ -29,7 +39,7 @@ jobs:
       - run: pnpm test
 
   build:
-    name: EAS Build (${{ github.ref_name == 'main' && 'production' || 'qa' }})
+    name: EAS Build
     needs: test
     runs-on: ubuntu-latest
     env:
@@ -49,14 +59,17 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      # QA build (develop branch)
-      - name: Build QA (iOS)
-        if: github.ref == 'refs/heads/develop'
-        working-directory: apps/mobile
-        run: eas build --platform ios --profile qa --non-interactive
+      - name: Determine build profile
+        id: profile
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "profile=${{ inputs.profile }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "profile=production" >> "$GITHUB_OUTPUT"
+          else
+            echo "profile=qa" >> "$GITHUB_OUTPUT"
+          fi
 
-      # Production build (main branch)
-      - name: Build Production (iOS)
-        if: github.ref == 'refs/heads/main'
+      - name: Build iOS
         working-directory: apps/mobile
-        run: eas build --platform ios --profile production --non-interactive
+        run: eas build --platform ios --profile ${{ steps.profile.outputs.profile }} --non-interactive
