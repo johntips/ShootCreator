@@ -11,3 +11,10 @@ build/
 .env
 .env.local
 .env.*.local
+
+# Secrets & Keys
+keys/
+*.p8
+*.pem
+*.key
+*.p12
