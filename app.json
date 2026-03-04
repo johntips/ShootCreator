@@ -1,8 +1,8 @@
 {
   "android": {
-    "package": "com.teiyuueki.shootcreater"
+    "package": "com.shootcreator.app"
   },
   "ios": {
-    "bundleIdentifier": "com.teiyuueki.shootcreater"
+    "bundleIdentifier": "com.shootcreator.app"
   }
 }

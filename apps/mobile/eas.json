@@ -1,26 +1,56 @@
 {
   "cli": {
-    "version": ">= 12.0.0"
+    "version": ">= 18.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
+    "base": {
+      "ios": {
+        "image": "latest"
+      },
+      "node": "20.19.5"
+    },
     "development": {
+      "extends": "base",
       "developmentClient": true,
       "distribution": "internal",
       "ios": {
         "simulator": true
+      },
+      "env": {
+        "APP_ENV": "qa"
       }
     },
-    "e2e": {
+    "qa": {
+      "extends": "base",
+      "distribution": "internal",
+      "autoIncrement": true,
       "ios": {
-        "simulator": true,
         "buildConfiguration": "Release"
       },
       "env": {
-        "E2E": "true"
-      }
+        "APP_ENV": "qa"
+      },
+      "channel": "qa"
     },
     "production": {
-      "autoIncrement": true
+      "extends": "base",
+      "autoIncrement": true,
+      "ios": {
+        "buildConfiguration": "Release"
+      },
+      "env": {
+        "APP_ENV": "production"
+      },
+      "channel": "production"
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "tu.ue.et@icloud.com",
+        "appleTeamId": "832VSWQQLH"
+      }
     }
   }
 }

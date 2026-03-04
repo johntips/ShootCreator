@@ -6,3 +6,8 @@ dist/
 build/
 *.tsbuildinfo
 .DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
