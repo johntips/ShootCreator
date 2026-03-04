@@ -165,7 +165,7 @@ export default function SessionScreen() {
     Alert.alert("End Session", "Save and end this shooting session?", [
       { text: "Cancel", style: "cancel" },
       {
-        text: "End",
+        text: "End Session",
         style: "destructive",
         onPress: async () => {
           const ended = endSession(session);

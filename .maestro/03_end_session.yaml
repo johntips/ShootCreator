@@ -21,8 +21,14 @@ appId: com.shootcreator.app.qa
 - tapOn:
     id: "btn-end-session"
 
-# Confirm alert dialog (iOS native alert with "Cancel" and "End")
-- tapOn: "End"
+# Wait for Alert to appear
+- waitForAnimationToEnd
+
+# Tap "End Session" in the iOS Alert dialog
+- tapOn: "End Session"
+
+# Wait for navigation to summary
+- waitForAnimationToEnd
 
 - takeScreenshot: summary_screen
 

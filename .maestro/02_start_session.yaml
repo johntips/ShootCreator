@@ -29,12 +29,18 @@ appId: com.shootcreator.app.qa
 
 - takeScreenshot: session_with_shots
 
-# End session to complete the flow
+# End session
 - tapOn:
     id: "btn-end-session"
 
-# Confirm alert dialog (button is "End", not "Save")
-- tapOn: "End"
+# Wait for Alert to appear
+- waitForAnimationToEnd
+
+# Tap "End Session" in the iOS Alert dialog
+- tapOn: "End Session"
+
+# Wait for navigation to summary
+- waitForAnimationToEnd
 
 # Verify summary screen
 - assertVisible:
