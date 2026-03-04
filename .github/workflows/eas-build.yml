@@ -59,6 +59,11 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      - name: Decode ASC API Key
+        run: |
+          mkdir -p keys
+          echo "${{ secrets.ASC_API_KEY_P8_BASE64 }}" | base64 --decode > keys/AuthKey.p8
+
       - name: Determine build profile
         id: profile
         run: |
