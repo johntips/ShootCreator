@@ -17,7 +17,7 @@ on:
           - production
 
 concurrency:
-  group: eas-build-${{ github.ref }}
+  group: eas-build-${{ github.ref }}-${{ inputs.profile || 'auto' }}
   cancel-in-progress: true
 
 jobs:
